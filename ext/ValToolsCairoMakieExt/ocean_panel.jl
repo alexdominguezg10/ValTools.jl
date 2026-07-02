@@ -30,6 +30,7 @@ end
 function _op_draw_panel!(fig, pos, lon, lat, field, spec, title;
                           u=nothing, v=nothing, sx=1, sy=1,
                           quiver_color=:black, quiver_scale=1.0,
+                          quiver_shaftwidth=1.5, quiver_tipwidth=4.0, quiver_tiplength=6.0,
                           color_percentile_low=2.0, color_percentile_high=98.0,
                           land_color=:gray55, font_size_title=16, font_size_labels=13,
                           font_size_ticks=11)
@@ -45,7 +46,8 @@ function _op_draw_panel!(fig, pos, lon, lat, field, spec, title;
         u_s = u[1:sx:end, 1:sy:end]; v_s = v[1:sx:end, 1:sy:end]
         lengthscale = _op_quiver_lengthscale(lon_s, lat_s, u_s, v_s, quiver_scale)
         arrows2d!(ax, lon_s, lat_s, u_s, v_s; color=quiver_color,
-                  lengthscale=lengthscale, tiplength=8, tipwidth=6)
+                  lengthscale=lengthscale, shaftwidth=quiver_shaftwidth,
+                  tiplength=quiver_tiplength, tipwidth=quiver_tipwidth)
     end
     Colorbar(fig[pos[1], pos[2]+1], hm; label=spec.label, labelsize=font_size_labels,
              ticklabelsize=font_size_ticks)
@@ -77,6 +79,10 @@ TAMOC, Multiphase_Plume, ...), not tied to any one field naming convention.
 - `quiver_scale=1.0`: arrow length multiplier (auto-scaled internally by grid
   spacing and median speed -- see balanced-density guidance; 1.0 is a good default)
 - `quiver_color=:black`
+- `quiver_shaftwidth=1.5`, `quiver_tipwidth=4.0`, `quiver_tiplength=6.0`: arrow shaft
+  thickness and arrowhead size in Makie's pixel-ish units (Makie's own `Arrows2D`
+  defaults are `shaftwidth=3`, `tipwidth=14`, `tiplength=8` -- these are already
+  slimmer/smaller, tuned so vectors read clearly without looking like thick darts)
 - `color_percentile_low=2.0`, `color_percentile_high=98.0`: color scale clipping
 - `land_color=:gray55`: NaN/land fill color
 - `font_size_title=16`, `font_size_labels=13`, `font_size_ticks=11`
@@ -92,6 +98,8 @@ function ValTools.plot_field_panel(lon::AbstractVector{<:Real}, lat::AbstractVec
                                     fig_width::Real=6.5, fig_height::Real=5.2, dpi::Real=150,
                                     quiver_density_x::Int=35, quiver_density_y::Int=35,
                                     quiver_scale::Real=1.0, quiver_color=:black,
+                                    quiver_shaftwidth::Real=1.5, quiver_tipwidth::Real=4.0,
+                                    quiver_tiplength::Real=6.0,
                                     color_percentile_low::Real=2.0, color_percentile_high::Real=98.0,
                                     land_color=:gray55,
                                     font_size_title::Real=16, font_size_labels::Real=13,
@@ -121,7 +129,9 @@ function ValTools.plot_field_panel(lon::AbstractVector{<:Real}, lat::AbstractVec
         if has_uv && name == quiver_field
             _op_draw_panel!(fig, (r, c), lon, lat, field, spec, panel_title;
                             u=u, v=v, sx=sx, sy=sy, quiver_color=quiver_color,
-                            quiver_scale=quiver_scale, color_percentile_low=color_percentile_low,
+                            quiver_scale=quiver_scale, quiver_shaftwidth=quiver_shaftwidth,
+                            quiver_tipwidth=quiver_tipwidth, quiver_tiplength=quiver_tiplength,
+                            color_percentile_low=color_percentile_low,
                             color_percentile_high=color_percentile_high, land_color=land_color,
                             font_size_title=font_size_title, font_size_labels=font_size_labels,
                             font_size_ticks=font_size_ticks)
@@ -166,6 +176,8 @@ Output format is chosen by `outpath`'s extension exactly like any Makie
 - `spec`: `NamedTuple` `(cmap=..., label=..., symmetric=::Bool)` for the field
 - `title_fn=i->""`: `Function`, frame index -> title string (e.g. include a timestamp)
 - `quiver_density_x=35`, `quiver_density_y=35`, `quiver_scale=1.0`, `quiver_color=:black`
+- `quiver_shaftwidth=1.5`, `quiver_tipwidth=4.0`, `quiver_tiplength=6.0`: arrow shaft
+  thickness and arrowhead size (see `plot_field_panel` for the rationale/defaults)
 - `color_percentile_low=2.0`, `color_percentile_high=98.0`, `land_color=:gray55`
 - `fig_width=6.5`, `fig_height=5.2`, `dpi=100`
 - `font_size_title=16`, `font_size_labels=13`
@@ -176,6 +188,8 @@ function ValTools.animate_field_realtime(lon::AbstractVector{<:Real}, lat::Abstr
                                           spec, title_fn::Function=i->"",
                                           quiver_density_x::Int=35, quiver_density_y::Int=35,
                                           quiver_scale::Real=1.0, quiver_color=:black,
+                                          quiver_shaftwidth::Real=1.5, quiver_tipwidth::Real=4.0,
+                                          quiver_tiplength::Real=6.0,
                                           color_percentile_low::Real=2.0, color_percentile_high::Real=98.0,
                                           land_color=:gray55, fig_width::Real=6.5, fig_height::Real=5.2,
                                           dpi::Real=100, font_size_title::Real=16, font_size_labels::Real=13,
@@ -217,7 +231,8 @@ function ValTools.animate_field_realtime(lon::AbstractVector{<:Real}, lat::Abstr
         u_obs = Observable(all_u[:, :, 1])
         v_obs = Observable(all_v[:, :, 1])
         arrows2d!(ax, lon_s, lat_s, u_obs, v_obs; color=quiver_color,
-                  lengthscale=lengthscale, tiplength=8, tipwidth=6)
+                  lengthscale=lengthscale, shaftwidth=quiver_shaftwidth,
+                  tiplength=quiver_tiplength, tipwidth=quiver_tipwidth)
     end
     ax.title = title_fn(frame_indices[1])
 
