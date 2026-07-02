@@ -207,8 +207,8 @@ function validate_rotary(u_model::AbstractVector, v_model::AbstractVector,
     length(u_model) == length(v_model) == length(u_obs) == length(v_obs) ||
         error("All inputs must have same length")
 
-    f_m, cw_m, ccw_m = rotary(collect(Float64, u_model), collect(Float64, v_model), Float64(dt))
-    f_o, cw_o, ccw_o = rotary(collect(Float64, u_obs),   collect(Float64, v_obs),   Float64(dt))
+    f_m, cw_m, ccw_m = rotary(collect(Float64, u_model), collect(Float64, v_model), Float64(dt); ntapers=ntapers)
+    f_o, cw_o, ccw_o = rotary(collect(Float64, u_obs),   collect(Float64, v_obs),   Float64(dt); ntapers=ntapers)
 
     n = min(length(f_m), length(f_o))
     f_m = f_m[1:n]; cw_m = cw_m[1:n]; ccw_m = ccw_m[1:n]

@@ -106,6 +106,7 @@ and acknowledge the jLab toolbox. See ATTRIBUTION.md for exact citations.
 module JLab
 
 using LinearAlgebra, Statistics, FFTW, SpecialFunctions
+using ..Metrics
 
 # Include submodules
 include("wavelets.jl")
@@ -120,7 +121,7 @@ export wavetrans, wavetrans_batch, tiredecode, transmax,
        morsewave, morsewave_freq, morsefreq, morseprops, morsespace,
        ridgemap, ridgechains, RidgeEvent,
        spectral_multitaper, mspec, sleptap,
-       ellipsefit, rotary,
+       ellipsefit, rotary, rotary_wavetrans, rotary_ridge,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,
        validate_spectra, validate_rotary, validate_model_spectra,
        kinetic_energy_budget, eddy_census,

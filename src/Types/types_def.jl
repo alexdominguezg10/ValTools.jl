@@ -108,6 +108,70 @@ struct SpectralEstimate{Q<:Number}
 end
 
 """
+    RotarySpectralEstimate
+
+Rotary (CW/CCW) spectral decomposition of a velocity time series `w = u + iv`,
+as produced by [`rotary_spectrum`](@ref). Unifies what used to be two
+independent implementations (`Metrics.rotary_spectrum` and `JLab.rotary`).
+
+# Fields
+- `freq`: positive frequency vector
+- `S_ccw`: counter-clockwise (positive frequency) power spectral density
+- `S_cw`: clockwise (negative frequency) power spectral density
+- `ci_ccw`: `(lower, upper)` jackknife confidence bounds for `S_ccw`, or `nothing`
+- `ci_cw`: `(lower, upper)` jackknife confidence bounds for `S_cw`, or `nothing`
+- `rotary_coefficient`: per-frequency `(S_ccw .- S_cw) ./ (S_ccw .+ S_cw)`,
+  in `[-1, 1]`; positive means CCW-dominant, negative means CW-dominant
+- `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt, ...)
+
+Supports tuple destructuring for backward compatibility with the old
+`(freqs, S_ccw, S_cw)` return convention, e.g. `f, ccw, cw = spec`.
+"""
+struct RotarySpectralEstimate
+    freq::Vector{Float64}
+    S_ccw::Vector{Float64}
+    S_cw::Vector{Float64}
+    ci_ccw::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
+    ci_cw::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
+    rotary_coefficient::Vector{Float64}
+    params::NamedTuple
+end
+
+Base.iterate(r::RotarySpectralEstimate) = (r.freq, Val(:S_ccw))
+Base.iterate(r::RotarySpectralEstimate, ::Val{:S_ccw}) = (r.S_ccw, Val(:S_cw))
+Base.iterate(r::RotarySpectralEstimate, ::Val{:S_cw}) = (r.S_cw, Val(:done))
+Base.iterate(r::RotarySpectralEstimate, ::Val{:done}) = nothing
+
+"""
+    RotaryCoherenceEstimate
+
+Rotary cross-spectral coherence between two velocity time series
+`w1 = u1 + iv1` and `w2 = u2 + iv2`, as produced by [`rotary_coherence`](@ref).
+Follows the CW/CCW decomposition of Gonella (1972) applied separately to
+each rotary component, per Mooers (1973) and Kundu (1976).
+
+# Fields
+- `freq`: positive frequency vector
+- `coh_ccw`: magnitude-squared coherence of the CCW (positive frequency) components, in `[0, 1]`
+- `coh_cw`: magnitude-squared coherence of the CW (negative frequency) components, in `[0, 1]`
+- `phase_ccw`: cross-spectral phase (radians) of the CCW components
+- `phase_cw`: cross-spectral phase (radians) of the CW components
+- `significance_level`: critical coherence value above which `coh_ccw`/`coh_cw`
+  is significantly nonzero at the requested confidence level, under the null
+  hypothesis of no true coherence (frequency-independent; `NaN` if `ntapers <= 1`)
+- `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt, ...)
+"""
+struct RotaryCoherenceEstimate
+    freq::Vector{Float64}
+    coh_ccw::Vector{Float64}
+    coh_cw::Vector{Float64}
+    phase_ccw::Vector{Float64}
+    phase_cw::Vector{Float64}
+    significance_level::Float64
+    params::NamedTuple
+end
+
+"""
     ColocatedObservation
 
 Result of pairing a model [`TimeSeriesVector`](@ref) with an observational

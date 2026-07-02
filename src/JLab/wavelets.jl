@@ -352,7 +352,7 @@ end
 
 # ── CPU path ────────────────────────────────────────────────────────────────
 
-function _wavetrans_cpu(x_pad::Vector{Float64}, bank::Matrix{Float64},
+function _wavetrans_cpu(x_pad::Vector{<:Number}, bank::Matrix{Float64},
                         N::Int, N_fft::Int, n_scales::Int)
     X  = fft(x_pad)
     wt = zeros(ComplexF64, N, n_scales)
@@ -370,6 +370,113 @@ function _wavetrans_gpu(x_pad, bank, N, N_fft, n_scales)
     error("""GPU wavelet transform requires CUDA.jl.
     Load it first:  `using CUDA`
     Then call:       `wavetrans(x; gpu=true)`""")
+end
+
+# ============================================================================
+# ROTARY WAVELET TRANSFORM & RIDGE ANALYSIS
+# ============================================================================
+
+"""
+    rotary_wavetrans(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0)
+
+Rotary (CW/CCW) wavelet decomposition of a velocity time series `w = u + iv`,
+extending the CW/CCW split of [`Metrics.rotary_spectrum`](@ref) to the
+time-frequency domain (Lilly & Olhede 2010).
+
+Because a Morse wavelet is analytic (one-sided: its spectrum has support only
+at positive frequencies), transforming the complex signal `w` directly
+isolates its counter-clockwise (positive-frequency) content, while
+transforming `conj(w) = u - iv` with the *same* wavelet bank isolates the
+clockwise (negative-frequency) content — no separate CW filter bank needed.
+
+# Arguments
+- `u`, `v`: east-west / north-south velocity components (equal length)
+- `dt`, `fs`, `nv`, `gamma`, `beta`: as in [`wavetrans`](@ref)
+
+# Returns
+- `wt_ccw::Matrix{ComplexF64}`: CCW-rotating wavelet coefficients `(N, n_freqs)`
+- `wt_cw::Matrix{ComplexF64}`: CW-rotating wavelet coefficients `(N, n_freqs)`
+- `fs::Vector{Float64}`: analysis frequencies (rad/sample), shared by both
+
+Both `wt_ccw` and `wt_cw` are ordinary `wavetrans`-shaped outputs, so
+[`ridgemap`](@ref), [`ridgechains`](@ref), and [`tiredecode`](@ref) all work
+on them directly — or use [`rotary_ridge`](@ref) for a one-call ridge
+summary of both components.
+
+# References
+Lilly, J. M. & Olhede, S. C. (2010). Bivariate instantaneous frequency and
+bandwidth. IEEE Trans. Signal Process., 58(2), 591–603.
+"""
+function rotary_wavetrans(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
+                          dt::Real=1.0,
+                          fs::Union{AbstractVector, Nothing}=nothing,
+                          nv::Int=8,
+                          gamma::Real=3.0,
+                          beta::Real=8.0)
+    length(u) == length(v) || error("u and v must have the same length")
+    N = length(u)
+    (N < 1) && error("Input must have at least 1 sample")
+
+    g, b = Float64(gamma), Float64(beta)
+    uf = _detrend_signal(collect(Float64, u))
+    vf = _detrend_signal(collect(Float64, v))
+
+    N_fft = 2^ceil(Int, log2(2 * N - 1))
+
+    if fs === nothing
+        P, _, _ = morseprops(g, b)
+        density = max(1, round(Int, nv * P / 4))
+        fs = morsespace(g, b, N; density=density)
+    end
+    fs = collect(Float64, fs)
+
+    bank = _build_filter_bank(N_fft, fs, g, b)
+
+    w = uf .+ im .* vf
+    wc = conj.(w)
+    w_pad = vcat(w, zeros(ComplexF64, N_fft - N))
+    wc_pad = vcat(wc, zeros(ComplexF64, N_fft - N))
+
+    wt_ccw = _wavetrans_cpu(w_pad, bank, N, N_fft, length(fs))
+    wt_cw = _wavetrans_cpu(wc_pad, bank, N, N_fft, length(fs))
+
+    return wt_ccw, wt_cw, fs
+end
+
+"""
+    rotary_ridge(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0, thresh=0.0)
+
+Wavelet ridge tracking of the CW and CCW rotary components of a velocity
+time series, i.e. the time-varying dominant frequency and amplitude of each
+sense of rotation (e.g. tracking an inertial oscillation's frequency drift).
+Combines [`rotary_wavetrans`](@ref) with [`ridgemap`](@ref) on each branch.
+
+# Returns
+A `NamedTuple` with:
+- `freq_ccw`, `amp_ccw`: ridge frequency/amplitude of the CCW component at each time
+- `freq_cw`, `amp_cw`: ridge frequency/amplitude of the CW component at each time
+- `rotary_coefficient`: instantaneous `(amp_ccw² - amp_cw²) / (amp_ccw² + amp_cw²)`,
+  `NaN` wherever either ridge is undetected
+"""
+function rotary_ridge(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
+                      dt::Real=1.0,
+                      fs::Union{AbstractVector, Nothing}=nothing,
+                      nv::Int=8,
+                      gamma::Real=3.0,
+                      beta::Real=8.0,
+                      thresh::Real=0.0)
+    wt_ccw, wt_cw, fs_out = rotary_wavetrans(u, v; dt=dt, fs=fs, nv=nv, gamma=gamma, beta=beta)
+
+    freq_ccw, amp_ccw = ridgemap(wt_ccw, fs_out; thresh=thresh)
+    freq_cw, amp_cw = ridgemap(wt_cw, fs_out; thresh=thresh)
+
+    total = amp_ccw .^ 2 .+ amp_cw .^ 2
+    rotary_coefficient = fill(NaN, length(total))
+    valid = .!isnan.(amp_ccw) .& .!isnan.(amp_cw) .& (total .> 0)
+    rotary_coefficient[valid] = (amp_ccw[valid] .^ 2 .- amp_cw[valid] .^ 2) ./ total[valid]
+
+    return (freq_ccw=freq_ccw, amp_ccw=amp_ccw, freq_cw=freq_cw, amp_cw=amp_cw,
+            rotary_coefficient=rotary_coefficient)
 end
 
 # ============================================================================

@@ -3,6 +3,7 @@ using ValTools
 using DataFrames
 using Dates
 using Statistics
+using Random
 using NCDatasets
 using CairoMakie
 
@@ -129,6 +130,70 @@ using CairoMakie
         # CCW signal at 0.1 cph → peak in S_ccw
         peak_idx = argmax(S_ccw)
         @test abs(freqs[peak_idx] - 0.1) < 0.02
+    end
+
+    @testset "rotary_spectrum — jackknife CI and rotary coefficient" begin
+        n = 256
+        t = collect(0.0:n-1)
+        u = cos.(2π * 0.1 .* t)
+        v = sin.(2π * 0.1 .* t)
+
+        spec = rotary_spectrum(u, v; dt_hours=1.0)
+        @test spec isa ValTools.RotarySpectralEstimate
+
+        # Backward-compatible tuple destructuring
+        f2, ccw2, cw2 = spec
+        @test f2 == spec.freq
+        @test ccw2 == spec.S_ccw
+        @test cw2 == spec.S_cw
+
+        # Jackknife CI brackets the point estimate
+        @test spec.ci_ccw !== nothing
+        @test spec.ci_cw !== nothing
+        lo_ccw, hi_ccw = spec.ci_ccw
+        @test all(lo_ccw .<= spec.S_ccw .<= hi_ccw)
+        lo_cw, hi_cw = spec.ci_cw
+        @test all(lo_cw .<= spec.S_cw .<= hi_cw)
+
+        # Rotary coefficient in [-1, 1], strongly CCW at the signal frequency
+        @test all(-1.0 .<= spec.rotary_coefficient .<= 1.0)
+        peak_idx = argmax(spec.S_ccw)
+        @test spec.rotary_coefficient[peak_idx] > 0.9
+
+        # ci=false disables the jackknife pass
+        spec_noci = rotary_spectrum(u, v; dt_hours=1.0, ci=false)
+        @test spec_noci.ci_ccw === nothing
+        @test spec_noci.ci_cw === nothing
+    end
+
+    @testset "rotary_coherence" begin
+        Random.seed!(7)
+        n = 512
+        t = collect(0.0:n-1)
+        f0 = 0.08
+
+        # Two CCW-rotating signals sharing a common signal + independent noise
+        u1 = cos.(2π * f0 .* t) .+ 0.2 .* randn(n)
+        v1 = sin.(2π * f0 .* t) .+ 0.2 .* randn(n)
+        u2 = cos.(2π * f0 .* t) .+ 0.2 .* randn(n)
+        v2 = sin.(2π * f0 .* t) .+ 0.2 .* randn(n)
+
+        rc = rotary_coherence(u1, v1, u2, v2; dt_hours=1.0)
+        @test rc isa ValTools.RotaryCoherenceEstimate
+        @test all(0.0 .<= rc.coh_ccw .<= 1.0)
+        @test all(0.0 .<= rc.coh_cw .<= 1.0)
+        @test all(-π .<= rc.phase_ccw .<= π)
+        @test 0.0 < rc.significance_level < 1.0
+
+        peak_idx = argmin(abs.(rc.freq .- f0))
+        @test rc.coh_ccw[peak_idx] > rc.significance_level
+        @test rc.coh_ccw[peak_idx] > rc.coh_cw[peak_idx]
+
+        # Independent white noise: coherence should mostly stay below significance
+        u3, v3, u4, v4 = randn(n), randn(n), randn(n), randn(n)
+        rc_noise = rotary_coherence(u3, v3, u4, v4; dt_hours=1.0)
+        @test mean(rc_noise.coh_ccw .> rc_noise.significance_level) < 0.25
+        @test mean(rc_noise.coh_cw .> rc_noise.significance_level) < 0.25
     end
 
     @testset "alongtrack_wavenumber_spectrum" begin

@@ -12,6 +12,8 @@ oceanographic validation workflows.
 - `TimeSeriesVector{Q<:Number}`: Single time series, unit-tagged via `Q`
 - `TimeSeriesMatrix{Q<:Number}`: Multiple time series, shared time axis
 - `SpectralEstimate{Q<:Number}`: Power spectral density with uncertainties
+- `RotarySpectralEstimate`: Rotary (CW/CCW) spectral decomposition with uncertainties
+- `RotaryCoherenceEstimate`: Rotary cross-spectral coherence between two velocity series
 - `ColocatedObservation`: Model-obs colocation result
 - `ObsMetadata`: Structured metadata (source, QC, location, etc.)
 
@@ -28,6 +30,7 @@ using Unitful
 
 include("types_def.jl")
 
-export TimeSeriesVector, TimeSeriesMatrix, SpectralEstimate, ColocatedObservation, ObsMetadata
+export TimeSeriesVector, TimeSeriesMatrix, SpectralEstimate, RotarySpectralEstimate,
+       RotaryCoherenceEstimate, ColocatedObservation, ObsMetadata
 
 end # module

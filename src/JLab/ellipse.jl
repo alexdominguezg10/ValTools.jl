@@ -105,114 +105,25 @@ end
     rotary(u::AbstractVector{<:Real}, v::AbstractVector{<:Real}, dt::Real;
            ntapers::Int=3, kind::String="power")
 
-Rotary spectral decomposition of velocity into CW and CCW components.
-
-# Arguments
-- `u::AbstractVector`: East-west velocity
-- `v::AbstractVector`: North-south velocity
-- `dt::Real`: Sampling interval
-- `ntapers::Int`: Number of tapers for spectral estimate
-- `kind::String`: "power" (default)
+**Deprecated** — thin wrapper over [`Metrics.rotary_spectrum`](@ref), the
+single unified rotary spectral implementation in ValTools.jl. Kept for
+backward compatibility with existing call sites (e.g. `JLab.validate_rotary`)
+and jLab's `polparams.m`-derived `(freqs, psd_cw, psd_ccw)` return order.
+Prefer calling `Metrics.rotary_spectrum` directly for new code — it also
+returns jackknife confidence intervals and a per-frequency rotary
+coefficient.
 
 # Returns
 - `freqs::Vector{Float64}`: Frequencies
 - `psd_cw::Vector{Float64}`: Clockwise rotary spectrum
 - `psd_ccw::Vector{Float64}`: Counter-clockwise rotary spectrum
 
-# Notes
-- For ocean: CW = inertial oscillations (NH);
-  CCW = tidal, wind-driven
-- See Gonella (1972) for theory
-
 # References
 Gonella (1972); jSpectral/polparams.m
 """
 function rotary(u::AbstractVector{<:Real}, v::AbstractVector{<:Real}, dt::Real;
                ntapers::Int=3, kind::String="power")
-
-    u = vec(u)
-    v = vec(v)
-
-    if length(u) != length(v)
-        error("u and v must have same length")
-    end
-
-    n = length(u)
-
-    # Complex velocity
-    w = u .+ im .* v
-
-    # FFT
-    N_fft = 2^ceil(Int, log2(2*n - 1))
-    w_pad = vcat(w, zeros(N_fft - n))
-    W = fft(w_pad)
-
-    # Frequency grid
-    freqs = fftfreq(N_fft, 1.0/dt)
-
-    # Gonella (1972) convention for w = u + iv:
-    # positive frequencies → CCW rotation
-    # negative frequencies → CW rotation
-    psd_all = (abs.(W).^2) .* dt ./ n
-
-    pos_mask = freqs .> 0
-    neg_mask = freqs .< 0
-
-    freqs_pos = freqs[pos_mask]
-    psd_ccw = psd_all[pos_mask]           # positive freq → CCW
-
-    freqs_neg = -freqs[neg_mask]
-    psd_cw_raw = psd_all[neg_mask]        # negative freq → CW
-
-    # Sort to match positive frequency order
-    order = sortperm(freqs_neg)
-    freqs_neg = freqs_neg[order]
-    psd_cw_raw = psd_cw_raw[order]
-
-    # Interpolate CW to positive frequency grid
-    psd_cw = linear_interp(freqs_neg, psd_cw_raw, freqs_pos)
-
-    return freqs_pos, psd_cw, psd_ccw
-end
-
-# Helper interpolation function
-function linear_interp(x::AbstractVector, y::AbstractVector, xi::AbstractVector)
-    yi = similar(xi)
-    for i in eachindex(xi)
-        # Find surrounding points
-        if xi[i] <= x[1]
-            yi[i] = y[1]
-        elseif xi[i] >= x[end]
-            yi[i] = y[end]
-        else
-            # Find interval
-            j = searchsortin(x, xi[i])
-            if j > length(x)
-                j = length(x)
-            end
-            if j == 0
-                j = 1
-            end
-
-            # Linear interpolation
-            if j < length(x)
-                w = (xi[i] - x[j]) / (x[j+1] - x[j])
-                yi[i] = (1-w) * y[j] + w * y[j+1]
-            else
-                yi[i] = y[j]
-            end
-        end
-    end
-    return yi
-end
-
-function searchsortin(a::AbstractVector, x::Real)
-    # Find index j such that a[j] <= x < a[j+1]
-    for j in 1:length(a)-1
-        if a[j] <= x < a[j+1]
-            return j
-        end
-    end
-    return length(a)
+    spec = Metrics.rotary_spectrum(u, v; dt_hours=dt, ntapers=ntapers, ci=false)
+    return spec.freq, spec.S_cw, spec.S_ccw
 end
 
