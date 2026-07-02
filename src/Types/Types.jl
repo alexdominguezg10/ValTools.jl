@@ -3,15 +3,22 @@
 
 Core type definitions for ValTools.jl.
 
-All types are Unitful-aware (carry units) and use typed metadata.
-Designed for polymorphic dispatch and clean oceanographic validation workflows.
+All types are Unitful-aware (carry units via a type parameter `Q<:Number`,
+normally a `Unitful.Quantity`) and use typed or free-form metadata.
+Designed for polymorphic dispatch (see [`Dispatch`](@ref)) and clean
+oceanographic validation workflows.
 
 ## Types Exported
-- TimeSeriesVector{Q<:Unitful.Quantity}: Single time series with units
-- TimeSeriesMatrix{Q<:Unitful.Quantity}: Multiple time series, shared time
-- SpectralEstimate{Q<:Unitful.Quantity}: Power spectral density with uncertainties
-- ColocatedObservation: Model-obs colocation result
-- ObsMetadata: Structured metadata (source, QC, location, etc.)
+- `TimeSeriesVector{Q<:Number}`: Single time series, unit-tagged via `Q`
+- `TimeSeriesMatrix{Q<:Number}`: Multiple time series, shared time axis
+- `SpectralEstimate{Q<:Number}`: Power spectral density with uncertainties
+- `ColocatedObservation`: Model-obs colocation result
+- `ObsMetadata`: Structured metadata (source, QC, location, etc.)
+
+`Q` is inferred automatically from the `value`/`power` array passed to
+the constructor — pass Unitful-quantity data (e.g. `randn(10) * u"m/s"`)
+for unit tracking, or bare `Float64` data for dimensionless series (e.g.
+after [`Dispatch.strip_units`](@ref)).
 """
 
 module Types

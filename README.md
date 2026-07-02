@@ -25,6 +25,7 @@ using CairoMakie          # activates the plot extension (optional)
 7. [Observation Loaders](#7-observation-loaders)
 8. [Plots (CairoMakie Extension)](#8-plots-cairomakie-extension)
 9. [Dependencies](#9-dependencies)
+12. [Type System & Polymorphic Dispatch (Types/Dispatch)](#12-type-system--polymorphic-dispatch-typesdispatch)
 
 ---
 
@@ -723,7 +724,62 @@ println("Max diff: ", maximum(abs.(z_cpu .- z_gpu)))
 | Colocation | 22 | Regular + curvilinear grids, mooring, section, pressure/depth, knockdown fit |
 | Observations | 20 | Synthetic NetCDF round-trips for GHRSST, DUACS, thermistor, mooring, IES, GEM |
 | Plots | 9 | Each plot function returns a `Figure` (taylor, maps, timeseries, LIC, streamlines, flow) |
-| **Total** | **~120** | |
+| Types & Dispatch | 75 | Construction, unit-preserving statistics/validation, unit-aware arithmetic, `SpectralEstimate` integration (`test/types/`) |
+| **Total** | **~195** | |
+
+---
+
+## 12. Type System & Polymorphic Dispatch (Types/Dispatch)
+
+Concrete, Unitful-aware types replacing plain `NamedTuple` returns, with
+multiple dispatch for statistics, validation, and arithmetic. `Q` (the
+type parameter on `TimeSeriesVector`, `TimeSeriesMatrix`, and
+`SpectralEstimate`) is inferred automatically from the data you pass in
+— a `Unitful.Quantity` for unit-tagged series, or bare `Float64` for
+dimensionless ones.
+
+```julia
+using ValTools, ValTools.Dispatch, Unitful, Dates
+
+t = Dates.now() .+ Dates.Second.(0:99)
+model = TimeSeriesVector(t, randn(100) * u"m/s" .+ 0.3u"m/s", "model", (;))
+obs   = TimeSeriesVector(t, randn(100) * u"m/s", "obs", (;))
+
+Dispatch.mean(model)           # preserves m/s
+model + obs                    # unit-checked elementwise sum (errors on mismatched time axis)
+Dispatch.rmse(model, obs)      # m/s
+Dispatch.validate(model, obs)  # (rmse=..., correlation=..., skill=..., bias=...)
+Dispatch.convert_units(model, u"cm/s")
+```
+
+### Types
+
+- `TimeSeriesVector{Q<:Number}` / `TimeSeriesMatrix{Q<:Number}` — time
+  series carrying units in the element type
+- `SpectralEstimate{Q<:Number}` — returned by `spectral_multitaper`
+  (JLab); pass `unit=u"m/s"` to get `power` in physical units (`unit^2`)
+  instead of dimensionless
+- `ObsMetadata`, `ColocatedObservation` — structured provenance and
+  model-obs colocation results
+
+### Dispatch — statistics & validation
+
+Requires `using ValTools.Dispatch`. `mean`, `std`, `var`, `cov` dispatch
+on `TimeSeriesVector`/`TimeSeriesMatrix` and preserve units; `rmse`,
+`correlation`, `skill_score`, `validate` compare a model series against
+an observed one (`correlation`/`skill_score` are unitless by
+construction, `rmse` preserves the shared unit).
+
+### Unit-aware arithmetic
+
+`+`, `-`, `*`, `/` extend `Base` and work with a plain `using ValTools`
+(no explicit `Dispatch` import needed). `convert_units`, `scale_to_unit`,
+`strip_units`, and `unit_of` require `using ValTools.Dispatch`.
+Dimensionally-incompatible operations raise `Unitful.DimensionError`;
+mismatched time axes raise a plain `ErrorException`.
+
+See `test/types/` for the full test suite (construction, unit-preserving
+statistics, arithmetic error paths, and `SpectralEstimate` integration).
 
 ---
 

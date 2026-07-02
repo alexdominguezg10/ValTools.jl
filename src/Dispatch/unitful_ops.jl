@@ -3,7 +3,15 @@
 import Base: +, -, *, /, ^
 import Unitful
 
-# Addition: ts1 + ts2 (units must match)
+"""
+    ts1 + ts2
+
+Elementwise sum of two [`Types.TimeSeriesVector`](@ref)s sharing the same
+time axis. Dimensions must be compatible (Unitful raises a
+`DimensionError` otherwise; compatible-but-different units are converted
+automatically). Errors if lengths or timestamps differ. `name` and
+`metadata` are combined (`"a + b"`, `merge(meta1, meta2)`).
+"""
 function +(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
     if length(ts1.time) != length(ts2.time)
         error("Time series must have same length for addition")
@@ -19,7 +27,13 @@ function +(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
     )
 end
 
-# Subtraction: ts1 - ts2 (units must match)
+"""
+    ts1 - ts2
+
+Elementwise difference of two [`Types.TimeSeriesVector`](@ref)s. Same
+requirements and semantics as [`+`](@ref) (shared time axis, compatible
+units).
+"""
 function -(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
     if length(ts1.time) != length(ts2.time)
         error("Time series must have same length for subtraction")
@@ -35,7 +49,13 @@ function -(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
     )
 end
 
-# Scalar multiplication: ts * scalar (preserves units)
+"""
+    ts * scalar
+    scalar * ts
+
+Scale a [`Types.TimeSeriesVector`](@ref) by a real scalar. Preserves the
+unit of `ts`.
+"""
 function *(ts::Types.TimeSeriesVector, scalar::Real)
     return Types.TimeSeriesVector(
         ts.time,
@@ -49,7 +69,12 @@ function *(scalar::Real, ts::Types.TimeSeriesVector)
     return ts * scalar
 end
 
-# Scalar division: ts / scalar (preserves units)
+"""
+    ts / scalar
+
+Divide a [`Types.TimeSeriesVector`](@ref) by a real scalar. Preserves the
+unit of `ts`.
+"""
 function /(ts::Types.TimeSeriesVector, scalar::Real)
     return Types.TimeSeriesVector(
         ts.time,
@@ -59,7 +84,13 @@ function /(ts::Types.TimeSeriesVector, scalar::Real)
     )
 end
 
-# Unit conversion helper
+"""
+    convert_units(ts::Types.TimeSeriesVector, target_unit)
+
+Convert `ts.value` to `target_unit` via `Unitful.uconvert`, e.g.
+`convert_units(ts, u"cm/s")`. Errors if `target_unit` has incompatible
+dimensions.
+"""
 function convert_units(ts::Types.TimeSeriesVector, target_unit)
     converted_value = Unitful.uconvert.(target_unit, ts.value)
     return Types.TimeSeriesVector(
@@ -70,7 +101,14 @@ function convert_units(ts::Types.TimeSeriesVector, target_unit)
     )
 end
 
-# Unit stripping (for operations that need dimensionless values)
+"""
+    strip_units(ts::Types.TimeSeriesVector)
+
+Return a copy of `ts` with `Unitful.ustrip` applied to every value,
+producing a bare `Float64` series. Use when passing data to code that
+doesn't understand `Unitful.Quantity` (e.g. [`correlation`](@ref)-style
+comparisons already do this internally).
+"""
 function strip_units(ts::Types.TimeSeriesVector)
     return Types.TimeSeriesVector(
         ts.time,
@@ -80,7 +118,12 @@ function strip_units(ts::Types.TimeSeriesVector)
     )
 end
 
-# Get unit information
+"""
+    unit_of(ts::Types.TimeSeriesVector)
+
+The `Unitful` unit of `ts.value`'s first element, or `nothing` if `ts` is
+empty.
+"""
 function unit_of(ts::Types.TimeSeriesVector)
     if isempty(ts.value)
         return nothing
@@ -88,7 +131,14 @@ function unit_of(ts::Types.TimeSeriesVector)
     return Unitful.unit(first(ts.value))
 end
 
-# Scale to reference unit
+"""
+    scale_to_unit(ts::Types.TimeSeriesVector, ref_unit)
+
+Convert `ts` to whatever unit `ref_unit` carries, e.g.
+`scale_to_unit(ts, 1.0u"cm/s")` converts to cm/s. Convenience wrapper
+around [`convert_units`](@ref) for when you have a reference quantity
+rather than a bare unit.
+"""
 function scale_to_unit(ts::Types.TimeSeriesVector, ref_unit)
     target_unit = Unitful.unit(1 * ref_unit)
     return convert_units(ts, target_unit)

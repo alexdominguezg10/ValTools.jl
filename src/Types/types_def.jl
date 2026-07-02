@@ -1,5 +1,27 @@
 import Dates, Unitful
 
+"""
+    TimeSeriesVector{Q<:Number}
+
+A single time series carrying its physical unit in the element type.
+
+`Q` is normally a `Unitful.Quantity` (e.g. `Quantity{Float64, 𝐋 𝐓⁻¹, ...}`
+for m/s), inferred automatically from `value`. Use a bare `Q<:Real` (no
+units) for dimensionless series, e.g. after [`strip_units`](@ref).
+
+# Fields
+- `time`: sample timestamps
+- `value`: samples, unit-tagged via Unitful (or bare `Float64` if dimensionless)
+- `name`: human-readable label (e.g. "velocity_u", "model - obs")
+- `metadata`: free-form `NamedTuple` for QC flags, source, provenance, etc.
+
+# Example
+```julia
+using Unitful, Dates
+t = Dates.now() .+ Dates.Second.(0:9)
+ts = TimeSeriesVector(t, randn(10) * u"m/s", "velocity", (;))
+```
+"""
 struct TimeSeriesVector{Q<:Number}
     time::Vector{Dates.DateTime}
     value::Vector{Q}
@@ -7,6 +29,27 @@ struct TimeSeriesVector{Q<:Number}
     metadata::NamedTuple
 end
 
+"""
+    TimeSeriesMatrix{Q<:Number}
+
+Multiple time series sharing a common time axis, e.g. velocity at several
+mooring depths or channels. Same unit-tracking convention as
+[`TimeSeriesVector`](@ref): `Q` is inferred from `value`.
+
+# Fields
+- `time`: sample timestamps, shared across all channels
+- `value`: `(n_time, n_channels)` matrix, unit-tagged via Unitful
+- `channels`: per-column labels (e.g. depth or station names)
+- `name`: human-readable label for the whole series
+- `metadata`: free-form `NamedTuple`
+
+# Example
+```julia
+using Unitful, Dates
+t = Dates.now() .+ Dates.Second.(0:9)
+tm = TimeSeriesMatrix(t, randn(10, 3) * u"m/s", ["10m", "50m", "100m"], "currents", (;))
+```
+"""
 struct TimeSeriesMatrix{Q<:Number}
     time::Vector{Dates.DateTime}
     value::Matrix{Q}
@@ -15,6 +58,21 @@ struct TimeSeriesMatrix{Q<:Number}
     metadata::NamedTuple
 end
 
+"""
+    ObsMetadata
+
+Structured provenance/QC metadata for an observational dataset, kept
+separate from [`TimeSeriesVector`](@ref)'s free-form `metadata` field for
+cases where a fixed, typed schema is preferred.
+
+# Fields
+- `source`: dataset origin (e.g. "NDBC", "Argo")
+- `units`: original units as reported by the source
+- `qc_flags`: per-sample QC pass/fail
+- `timestamp`: retrieval or processing time
+- `instrument`: instrument or sensor name
+- `location`: free-form `NamedTuple`, typically `(lat=..., lon=...)`
+"""
 struct ObsMetadata
     source::String
     units::String
@@ -24,6 +82,23 @@ struct ObsMetadata
     location::NamedTuple
 end
 
+"""
+    SpectralEstimate{Q<:Number}
+
+Power spectral density estimate with optional uncertainty diagnostics,
+as produced by [`spectral_multitaper`](@ref).
+
+`Q` follows the same unit convention as [`TimeSeriesVector`](@ref): pass
+a `unit` keyword to the estimator to get `power` in physical units
+(typically `unit^2`, i.e. a variance density), or leave it dimensionless.
+
+# Fields
+- `freq`: frequency vector (positive frequencies)
+- `power`: power spectral density, unit-tagged via Unitful or bare `Float64`
+- `ftest_pval`: F-test p-values for line components, or `nothing`
+- `jkvar`: jackknifed variance (confidence intervals), or `nothing`
+- `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt, ...)
+"""
 struct SpectralEstimate{Q<:Number}
     freq::Vector{Float64}
     power::Vector{Q}
@@ -32,6 +107,19 @@ struct SpectralEstimate{Q<:Number}
     params::NamedTuple
 end
 
+"""
+    ColocatedObservation
+
+Result of pairing a model [`TimeSeriesVector`](@ref) with an observational
+one at a common location, plus the validation metrics computed between them
+(typically via [`validate`](@ref)).
+
+# Fields
+- `model`: model time series at the colocation point
+- `obs`: observational time series at the colocation point
+- `distance`: colocation distance (e.g. km from obs to nearest model point)
+- `metrics`: free-form `NamedTuple`, typically `(rmse=..., correlation=..., skill=..., bias=...)`
+"""
 struct ColocatedObservation
     model::TimeSeriesVector
     obs::TimeSeriesVector
