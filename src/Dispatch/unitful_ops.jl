@@ -12,10 +12,10 @@ function +(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
         error("Time series must have same time axis for addition")
     end
     return Types.TimeSeriesVector(
-        time=ts1.time,
-        value=ts1.value .+ ts2.value,  # Unitful handles unit checking
-        name="$(ts1.name) + $(ts2.name)",
-        metadata=merge(ts1.metadata, ts2.metadata)
+        ts1.time,
+        ts1.value .+ ts2.value,  # Unitful handles unit checking
+        "$(ts1.name) + $(ts2.name)",
+        merge(ts1.metadata, ts2.metadata)
     )
 end
 
@@ -28,20 +28,20 @@ function -(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
         error("Time series must have same time axis for subtraction")
     end
     return Types.TimeSeriesVector(
-        time=ts1.time,
-        value=ts1.value .- ts2.value,
-        name="$(ts1.name) - $(ts2.name)",
-        metadata=merge(ts1.metadata, ts2.metadata)
+        ts1.time,
+        ts1.value .- ts2.value,
+        "$(ts1.name) - $(ts2.name)",
+        merge(ts1.metadata, ts2.metadata)
     )
 end
 
 # Scalar multiplication: ts * scalar (preserves units)
 function *(ts::Types.TimeSeriesVector, scalar::Real)
     return Types.TimeSeriesVector(
-        time=ts.time,
-        value=ts.value .* scalar,
-        name="$(ts.name) × $scalar",
-        metadata=ts.metadata
+        ts.time,
+        ts.value .* scalar,
+        "$(ts.name) × $scalar",
+        ts.metadata
     )
 end
 
@@ -52,10 +52,10 @@ end
 # Scalar division: ts / scalar (preserves units)
 function /(ts::Types.TimeSeriesVector, scalar::Real)
     return Types.TimeSeriesVector(
-        time=ts.time,
-        value=ts.value ./ scalar,
-        name="$(ts.name) / $scalar",
-        metadata=ts.metadata
+        ts.time,
+        ts.value ./ scalar,
+        "$(ts.name) / $scalar",
+        ts.metadata
     )
 end
 
@@ -63,20 +63,20 @@ end
 function convert_units(ts::Types.TimeSeriesVector, target_unit)
     converted_value = Unitful.uconvert.(target_unit, ts.value)
     return Types.TimeSeriesVector(
-        time=ts.time,
-        value=converted_value,
-        name=ts.name,
-        metadata=ts.metadata
+        ts.time,
+        converted_value,
+        ts.name,
+        ts.metadata
     )
 end
 
 # Unit stripping (for operations that need dimensionless values)
 function strip_units(ts::Types.TimeSeriesVector)
     return Types.TimeSeriesVector(
-        time=ts.time,
-        value=Unitful.ustrip.(ts.value),
-        name=ts.name,
-        metadata=ts.metadata
+        ts.time,
+        Unitful.ustrip.(ts.value),
+        ts.name,
+        ts.metadata
     )
 end
 

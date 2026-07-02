@@ -1,15 +1,15 @@
 import Dates, Unitful
 
-struct TimeSeriesVector{T, U}
+struct TimeSeriesVector{Q<:Number}
     time::Vector{Dates.DateTime}
-    value::Vector{Unitful.Quantity{T, U}}
+    value::Vector{Q}
     name::String
     metadata::NamedTuple
 end
 
-struct TimeSeriesMatrix{T, U}
+struct TimeSeriesMatrix{Q<:Number}
     time::Vector{Dates.DateTime}
-    value::Matrix{Unitful.Quantity{T, U}}
+    value::Matrix{Q}
     channels::Vector{String}
     name::String
     metadata::NamedTuple
@@ -24,9 +24,9 @@ struct ObsMetadata
     location::NamedTuple
 end
 
-struct SpectralEstimate{T, U}
+struct SpectralEstimate{Q<:Number}
     freq::Vector{Float64}
-    power::Vector{Unitful.Quantity{T, U}}
+    power::Vector{Q}
     ftest_pval::Union{Vector{Float64}, Nothing}
     jkvar::Union{Vector{Float64}, Nothing}
     params::NamedTuple

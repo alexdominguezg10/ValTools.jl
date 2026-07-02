@@ -7,9 +7,9 @@ All types are Unitful-aware (carry units) and use typed metadata.
 Designed for polymorphic dispatch and clean oceanographic validation workflows.
 
 ## Types Exported
-- TimeSeriesVector{T, U}: Single time series with units
-- TimeSeriesMatrix{T, U}: Multiple time series, shared time
-- SpectralEstimate{T, U}: Power spectral density with uncertainties
+- TimeSeriesVector{Q<:Unitful.Quantity}: Single time series with units
+- TimeSeriesMatrix{Q<:Unitful.Quantity}: Multiple time series, shared time
+- SpectralEstimate{Q<:Unitful.Quantity}: Power spectral density with uncertainties
 - ColocatedObservation: Model-obs colocation result
 - ObsMetadata: Structured metadata (source, QC, location, etc.)
 """
