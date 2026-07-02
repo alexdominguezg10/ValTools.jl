@@ -13,6 +13,8 @@ GPU acceleration available via CUDA extension when loaded.
 
 import FFTW: fft, fftfreq
 using Multitaper: multispec, dpss_tapers, MTSpectrum
+using ..Types
+using Unitful
 
 # ============================================================================
 # NEW: Wrapper around Multitaper.jl
@@ -36,24 +38,25 @@ and jackknifed confidence intervals.
 - `detrend`: "none", "constant", or "linear" (default "linear")
 
 # Returns
-- `MTSpectrum` struct with:
-  - `f`: frequency vector (positive frequencies)
-  - `S`: power spectral density
-  - `params`: MTParameters (nw, K, dt, etc.)
-  - `Fpval`: F-test p-values for line components
+- `Types.SpectralEstimate` (or a `Vector` of them for a batch of `M` signals) with:
+  - `freq`: frequency vector (positive frequencies)
+  - `power`: power spectral density, carrying `unit^2` when `unit` is given
+  - `ftest_pval`: F-test p-values for line components
   - `jkvar`: jackknifed variance (confidence intervals)
+  - `params`: NamedTuple of estimation parameters (nw, ntapers, dt, detrend, N)
 
 # Example
 ```julia
 x = randn(1000)
-spec = spectral_multitaper(x, 0.1; nw=4.0)
-plot(spec.f, spec.S)
+spec = spectral_multitaper(x, 0.1; nw=4.0, unit=u"m/s")
+plot(spec.freq, spec.power)
 ```
 """
 function spectral_multitaper(x::Union{Vector{Float64}, Matrix{Float64}},
                              dt::Real=1.0;
                              nw::Float64=4.0, ntapers::Int=0,
-                             detrend::String="linear")
+                             detrend::String="linear",
+                             unit=Unitful.NoUnits)
 
     # Ensure Float64
     x = Float64.(x)
@@ -87,14 +90,24 @@ function spectral_multitaper(x::Union{Vector{Float64}, Matrix{Float64}},
     if M == 1
         spec = multispec(x_detrended[:, 1]; NW=nw, K=ntapers, dt=dt,
                         ctr=false, a_weight=true, Ftest=true, jk=true)
-        return spec
+        return _to_spectral_estimate(spec, nw, ntapers, dt, detrend, unit)
     else
-        # Batch: return vector of MTSpectrum
+        # Batch: return vector of SpectralEstimate
         specs = [multispec(x_detrended[:, m]; NW=nw, K=ntapers, dt=dt,
                           ctr=false, a_weight=true, Ftest=true, jk=true)
                  for m in 1:M]
-        return specs
+        return [_to_spectral_estimate(s, nw, ntapers, dt, detrend, unit) for s in specs]
     end
+end
+
+# Convert a Multitaper.jl MTSpectrum into a ValTools Types.SpectralEstimate
+function _to_spectral_estimate(spec::MTSpectrum, nw, ntapers, dt, detrend, unit)
+    freq = collect(Float64, spec.f)
+    power = spec.S .* unit^2
+    ftest_pval = spec.Fpval === nothing ? nothing : collect(Float64, spec.Fpval)
+    jkvar = spec.jkvar === nothing ? nothing : collect(Float64, spec.jkvar)
+    params = (nw=nw, ntapers=ntapers, dt=dt, detrend=detrend, N=spec.params.N)
+    return Types.SpectralEstimate(freq, power, ftest_pval, jkvar, params)
 end
 
 
