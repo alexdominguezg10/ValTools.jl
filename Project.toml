@@ -1,0 +1,46 @@
+name = "ValTools"
+uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+version = "0.1.0"
+authors = ["Alex Dominguez <adomingu@cicese.edu.mx>"]
+
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+Glob = "c27321d9-0574-5035-807b-f59d2c89b15c"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Multitaper = "a81958ac-9ec9-4086-814d-3ae87249a5e8"
+NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
+NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+
+[extensions]
+ValToolsCUDAExt = "CUDA"
+ValToolsCairoMakieExt = "CairoMakie"
+
+[compat]
+DataFrames = "1"
+FFTW = "1"
+Glob = "1"
+Interpolations = "0.15, 0.16"
+Multitaper = "1.2.0"
+NCDatasets = "0.13, 0.14, 0.15"
+NearestNeighbors = "0.4"
+SpecialFunctions = "2.8.0"
+Unitful = "1.28.0"
+julia = "1.10"
+
+[extras]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "CairoMakie"]
