@@ -112,6 +112,45 @@ end
 
 
 # ============================================================================
+# DEPRECATED ALIASES (jLab-compatible names)
+# ============================================================================
+
+"""
+    sleptap(n::Integer, k::Integer; bandwidth::Real=4.0)
+
+**Deprecated** — thin wrapper over `Multitaper.dpss_tapers` kept for
+backward compatibility with jLab's `sleptap.m` and existing call sites.
+Prefer calling `spectral_multitaper` directly for new code.
+
+Returns `(tapers, lambdas)`: an `(n, k)` matrix of Slepian (DPSS) tapers
+and their concentration eigenvalues, sorted descending.
+"""
+function sleptap(n::Integer, k::Integer; bandwidth::Real=4.0)
+    n > 0 || error("sleptap: n must be positive, got $n")
+    k > 0 || error("sleptap: k must be positive, got $k")
+    tapers, lambdas = dpss_tapers(n, Float64(bandwidth), k, :both)
+    return tapers, lambdas
+end
+
+"""
+    mspec(x, dt=1.0; ntapers=5, detrend="linear", gpu=false)
+
+**Deprecated** — thin wrapper over [`spectral_multitaper`](@ref) kept for
+backward compatibility with jLab's `mspec.m` and existing call sites
+(e.g. `JLab.validate_spectra`). Unwraps the `Types.SpectralEstimate`
+into a plain `(freqs, psd)` tuple.
+"""
+function mspec(x::Union{Vector{Float64}, Matrix{Float64}}, dt::Real=1.0;
+               ntapers::Int=5, detrend::String="linear", gpu::Bool=false)
+    if gpu
+        spectral_multitaper_gpu(x, dt; ntapers=ntapers, detrend=detrend, gpu=gpu)
+    end
+    spec = spectral_multitaper(x, dt; ntapers=ntapers, detrend=detrend)
+    return spec.freq, spec.power
+end
+
+
+# ============================================================================
 # GPU PATH (loaded by CUDA extension)
 # ============================================================================
 
