@@ -19,7 +19,9 @@ using Dates
 using ..Types
 
 include("dispatch_impl.jl")
+include("unitful_ops.jl")
 
 export mean, std, var, cov, rmse, correlation, skill_score, validate
+export convert_units, strip_units, unit_of, scale_to_unit
 
 end # module

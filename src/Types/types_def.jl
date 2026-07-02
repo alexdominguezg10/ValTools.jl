@@ -39,8 +39,3 @@ struct ColocatedObservation
     metrics::NamedTuple
 end
 
-# Convenience constructors
-TimeSeriesVector(time, value, name) = TimeSeriesVector(time, value, name, NamedTuple())
-TimeSeriesMatrix(time, value, channels, name) = TimeSeriesMatrix(time, value, channels, name, NamedTuple())
-TimeSeriesVector(; time, value, name, metadata=NamedTuple()) = TimeSeriesVector(time, value, name, metadata)
-TimeSeriesMatrix(; time, value, channels, name, metadata=NamedTuple()) = TimeSeriesMatrix(time, value, channels, name, metadata)
