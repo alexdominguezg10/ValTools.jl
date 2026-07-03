@@ -879,3 +879,125 @@ function transmax(wt::AbstractMatrix{<:Complex}; n::Int=1)
     iscale = @. (idx - 1) ÷ nt + 1
     return itime, iscale, amp_flat[idx]
 end
+
+# ============================================================================
+# WAVELET RIDGE SIGNIFICANCE (Monte Carlo, Torrence & Compo 1998 in spirit)
+# ============================================================================
+
+"""
+    wavelet_significance(x; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0,
+                        background=:white, confidence=0.95, n_surrogates=200,
+                        rng=Random.default_rng())
+
+Per-scale significance threshold for the continuous wavelet power spectrum
+of `x`, for distinguishing a genuine ridge (an eddy, an inertial
+oscillation) from what pure background noise could produce at each scale.
+
+Unlike Torrence & Compo (1998)'s analytic chi-square formula — which relies
+on a wavelet-specific "reconstruction factor" only worked out for the
+Morlet wavelet — this estimates the threshold empirically: it generates
+`n_surrogates` random realizations of `background` noise (`:white`, or
+`:red` i.e. lag-1 AR(1) matched to `x`'s empirical lag-1 autocorrelation)
+with the same length and variance as `x`, wavelet-transforms each with
+[`wavetrans`](@ref) using the same parameters as the real signal, and takes
+the per-scale `confidence` quantile of each surrogate's *time-maximum*
+power (not the pointwise power) — i.e. "how strong can the single best
+noise fluctuation get, at this scale, over a record this long." That
+time-maximum is the right comparison for ridge detection, which itself
+asks about the strongest point at each scale, not the average.
+
+# Returns
+- `sig_level::Vector{Float64}`: per-scale threshold on `abs2.(wt)`, same
+  length as `fs`. A ridge is significant at scale `j` if its amplitude
+  `amp[j]` satisfies `amp[j]^2 > sig_level[j]`; see [`ridge_significant`](@ref)
+  for applying this directly to [`ridgemap`](@ref)/[`rotary_ridge`](@ref) output.
+- `fs::Vector{Float64}`: analysis frequencies (rad/sample), matching `wavetrans`.
+
+# References
+Torrence, C. & Compo, G. P. (1998). A practical guide to wavelet analysis.
+Bull. Amer. Meteor. Soc., 79(1), 61–78. (Monte Carlo alternative to their
+eq. 17–18 analytic formula, used here since no equivalent closed-form
+reconstruction factor is established for the generalized Morse wavelets
+used by [`wavetrans`](@ref).)
+"""
+function wavelet_significance(x::AbstractVector{<:Real};
+                              dt::Real=1.0,
+                              fs::Union{AbstractVector, Nothing}=nothing,
+                              nv::Int=8,
+                              gamma::Real=3.0,
+                              beta::Real=8.0,
+                              background::Symbol=:white,
+                              confidence::Real=0.95,
+                              n_surrogates::Int=200,
+                              rng::Random.AbstractRNG=Random.default_rng())
+    xv = collect(Float64, x)
+    N = length(xv)
+    N < 4 && error("x must have at least 4 samples")
+    background in (:white, :red) || error("background must be :white or :red")
+    n_surrogates > 1 || error("n_surrogates must be > 1")
+
+    mu = mean(xv)
+    sigma = std(xv)
+
+    _, fs_ref = wavetrans(xv; dt=dt, fs=fs, nv=nv, gamma=gamma, beta=beta)
+    n_freq = length(fs_ref)
+
+    alpha = 0.0
+    if background == :red
+        xc = xv .- mu
+        denom = sum(abs2, xc)
+        alpha = denom > 0 ? clamp(sum(xc[1:end-1] .* xc[2:end]) / denom, 0.0, 0.95) : 0.0
+    end
+
+    max_power = Matrix{Float64}(undef, n_surrogates, n_freq)
+    for s in 1:n_surrogates
+        surrogate = background == :white ? mu .+ sigma .* randn(rng, N) :
+                                            _ar1_surrogate(N, alpha, mu, sigma, rng)
+        wt_s, _ = wavetrans(surrogate; dt=dt, fs=fs_ref, nv=nv, gamma=gamma, beta=beta)
+        max_power[s, :] = vec(maximum(abs2.(wt_s); dims=1))
+    end
+
+    sig_level = [quantile(@view(max_power[:, j]), confidence) for j in 1:n_freq]
+    return sig_level, fs_ref
+end
+
+function _ar1_surrogate(N::Int, alpha::Real, mu::Real, sigma::Real, rng::Random.AbstractRNG)
+    innov_sd = sigma * sqrt(max(1 - alpha^2, 1e-12))
+    z = Vector{Float64}(undef, N)
+    z[1] = sigma * randn(rng)
+    for i in 2:N
+        z[i] = alpha * z[i-1] + innov_sd * randn(rng)
+    end
+    return mu .+ z
+end
+
+"""
+    ridge_significant(ridge_freq, ridge_amp, sig_level, fs)
+
+Flag which points of a [`ridgemap`](@ref)/[`rotary_ridge`](@ref) ridge are
+significant against the noise threshold from [`wavelet_significance`](@ref).
+
+`ridge_freq[i]` is matched to the nearest entry of `fs` (they coincide
+exactly when both come from the same `wavetrans` call), and the point is
+flagged significant when `ridge_amp[i]^2 > sig_level[j]` at that scale.
+`NaN` ridge points (undetected at that time) are always `false`.
+
+# Returns
+`BitVector`, same length as `ridge_freq`/`ridge_amp`.
+"""
+function ridge_significant(ridge_freq::AbstractVector{<:Real},
+                           ridge_amp::AbstractVector{<:Real},
+                           sig_level::AbstractVector{<:Real},
+                           fs::AbstractVector{<:Real})
+    length(ridge_freq) == length(ridge_amp) || error("ridge_freq and ridge_amp must have the same length")
+    length(sig_level) == length(fs) || error("sig_level and fs must have the same length")
+
+    out = falses(length(ridge_freq))
+    for i in eachindex(ridge_freq)
+        f = ridge_freq[i]
+        isnan(f) && continue
+        j = argmin(abs.(fs .- f))
+        out[i] = ridge_amp[i]^2 > sig_level[j]
+    end
+    return out
+end

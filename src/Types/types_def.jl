@@ -122,6 +122,16 @@ independent implementations (`Metrics.rotary_spectrum` and `JLab.rotary`).
 - `ci_cw`: `(lower, upper)` jackknife confidence bounds for `S_cw`, or `nothing`
 - `rotary_coefficient`: per-frequency `(S_ccw .- S_cw) ./ (S_ccw .+ S_cw)`,
   in `[-1, 1]`; positive means CCW-dominant, negative means CW-dominant
+- `ftest_ccw`: Thomson (1982) harmonic F-test p-values for a line component
+  in the CCW branch, or `nothing` if `ftest=false` / `ntapers <= 1`. Small
+  p-values (e.g. `< 0.05`) indicate the CCW power at that frequency is
+  better explained by a coherent line component than by a stochastic
+  background — i.e. a genuine rotary peak rather than noise.
+- `ftest_cw`: same as `ftest_ccw`, for the CW branch. Computed natively on
+  the (unevenly-spaced) negative-frequency FFT bins, then linearly
+  interpolated onto `freq` for a common grid with `ftest_ccw` — an
+  approximation near sharp features, consistent with how `S_cw` itself is
+  already interpolated in this function.
 - `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt, ...)
 
 Supports tuple destructuring for backward compatibility with the old
@@ -134,6 +144,8 @@ struct RotarySpectralEstimate
     ci_ccw::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     ci_cw::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     rotary_coefficient::Vector{Float64}
+    ftest_ccw::Union{Vector{Float64}, Nothing}
+    ftest_cw::Union{Vector{Float64}, Nothing}
     params::NamedTuple
 end
 

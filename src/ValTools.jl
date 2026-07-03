@@ -65,7 +65,7 @@ include("JLab/JLab.jl")
 using .JLab
 export wavetrans, wavetrans_batch, tiredecode, transmax,
        morsewave, morsewave_freq,
-       ridgemap,
+       ridgemap, wavelet_significance, ridge_significant,
        mspec, sleptap,
        ellipsefit, rotary, rotary_wavetrans, rotary_ridge,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,

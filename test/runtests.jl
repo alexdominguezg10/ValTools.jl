@@ -167,6 +167,35 @@ using Multitaper
         @test spec_noci.ci_cw === nothing
     end
 
+    @testset "rotary_spectrum — F-test significance" begin
+        Random.seed!(13)
+        n = 256
+        t = collect(0.0:n-1)
+        u = cos.(2π * 0.1 .* t) .+ 0.05 .* randn(n)
+        v = sin.(2π * 0.1 .* t) .+ 0.05 .* randn(n)
+
+        spec = rotary_spectrum(u, v; dt_hours=1.0)
+        @test spec.ftest_ccw !== nothing
+        @test spec.ftest_cw !== nothing
+        @test all(0.0 .<= spec.ftest_ccw .<= 1.0)
+        @test all(0.0 .<= spec.ftest_cw .<= 1.0)
+
+        # F-test correctly flags the true CCW line frequency as significant
+        peak_idx = argmin(spec.ftest_ccw)
+        @test abs(spec.freq[peak_idx] - 0.1) < 0.02
+
+        # ftest=false disables it
+        spec_noftest = rotary_spectrum(u, v; dt_hours=1.0, ftest=false)
+        @test spec_noftest.ftest_ccw === nothing
+        @test spec_noftest.ftest_cw === nothing
+
+        # Pure noise: F-test shouldn't flag most frequencies as significant
+        un, vn = randn(n), randn(n)
+        spec_noise = rotary_spectrum(un, vn; dt_hours=1.0)
+        @test mean(spec_noise.ftest_ccw .< 0.05) < 0.25
+        @test mean(spec_noise.ftest_cw .< 0.05) < 0.25
+    end
+
     @testset "rotary_coherence" begin
         Random.seed!(7)
         n = 512

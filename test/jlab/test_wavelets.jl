@@ -199,4 +199,76 @@ Random.seed!(42)
         @test_throws ErrorException wavetrans(randn(100); gpu=true)
         @test_throws ErrorException wavetrans_batch(randn(100, 3); gpu=true)
     end
+
+    @testset "wavelet_significance — signal exceeds noise threshold" begin
+        N = 300
+        dt = 1.0
+        t = (0:N-1) .* dt
+        f0 = 0.3  # rad/sample
+
+        x = 2.0 .* cos.(f0 .* t) .+ 0.3 .* randn(MersenneTwister(1), N)
+
+        wt, fs = wavetrans(x; dt=dt, nv=8)
+        rf, ra = ridgemap(wt, fs)
+
+        sig_level, fs_sig = wavelet_significance(x; dt=dt, fs=fs, n_surrogates=100,
+                                                  rng=MersenneTwister(99))
+        @test fs_sig == fs
+        @test length(sig_level) == length(fs)
+        @test all(sig_level .> 0)
+
+        sig_flags = ridge_significant(rf, ra, sig_level, fs)
+        valid = .!isnan.(rf)
+        @test mean(sig_flags[valid]) > 0.7
+    end
+
+    @testset "wavelet_significance — pure noise mostly insignificant" begin
+        N = 300
+        xn = randn(MersenneTwister(2), N)
+
+        wt, fs = wavetrans(xn; dt=1.0, nv=8)
+        rf, ra = ridgemap(wt, fs)
+
+        sig_level, _ = wavelet_significance(xn; dt=1.0, fs=fs, n_surrogates=100,
+                                             rng=MersenneTwister(77))
+        sig_flags = ridge_significant(rf, ra, sig_level, fs)
+        valid = .!isnan.(rf)
+        @test mean(sig_flags[valid]) < 0.5
+    end
+
+    @testset "wavelet_significance — AR(1) red-noise background" begin
+        function _make_ar1(N, alpha, rng)
+            z = zeros(N)
+            z[1] = randn(rng)
+            for i in 2:N
+                z[i] = alpha * z[i-1] + randn(rng)
+            end
+            return z
+        end
+
+        xr = _make_ar1(300, 0.6, MersenneTwister(3))
+        sig_level, fs = wavelet_significance(xr; background=:red, n_surrogates=80,
+                                              rng=MersenneTwister(55))
+        @test length(sig_level) == length(fs)
+        @test all(sig_level .> 0)
+    end
+
+    @testset "wavelet_significance — argument errors" begin
+        @test_throws ErrorException wavelet_significance(randn(3))
+        @test_throws ErrorException wavelet_significance(randn(50); background=:pink)
+        @test_throws ErrorException wavelet_significance(randn(50); n_surrogates=1)
+    end
+
+    @testset "ridge_significant — length checks and NaN handling" begin
+        fs = [1.0, 0.5, 0.25]
+        sig_level = [1.0, 1.0, 1.0]
+        rf = [0.5, NaN, 1.0]
+        ra = [2.0, 5.0, 0.1]
+
+        flags = ridge_significant(rf, ra, sig_level, fs)
+        @test flags == [true, false, false]
+
+        @test_throws ErrorException ridge_significant([1.0], [1.0, 2.0], sig_level, fs)
+        @test_throws ErrorException ridge_significant(rf, ra, [1.0], fs)
+    end
 end

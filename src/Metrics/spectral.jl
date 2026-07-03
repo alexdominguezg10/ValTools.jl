@@ -18,16 +18,27 @@ deprecated wrapper around this function).
 - `ntapers`: number of tapers (default: `2*floor(nw) - 1`)
 - `ci`: compute jackknife-over-tapers confidence intervals (default `true`)
 - `confidence`: confidence level for `ci_ccw`/`ci_cw` (default 0.95)
+- `ftest`: compute a Thomson (1982) harmonic F-test for a line component in
+  each rotary branch (default `true`; see `ftest_ccw`/`ftest_cw` below)
 
 # Returns
 A [`Types.RotarySpectralEstimate`](@ref) with fields `freq`, `S_ccw`, `S_cw`,
-`ci_ccw`, `ci_cw`, `rotary_coefficient`, `params`. Also supports tuple
-destructuring `freqs, S_ccw, S_cw = rotary_spectrum(u, v)` for backward
-compatibility.
+`ci_ccw`, `ci_cw`, `rotary_coefficient`, `ftest_ccw`, `ftest_cw`, `params`.
+Also supports tuple destructuring `freqs, S_ccw, S_cw = rotary_spectrum(u, v)`
+for backward compatibility.
+
+`ftest_ccw`/`ftest_cw` are per-frequency p-values under the null hypothesis
+of no coherent line component (pure background noise) in that rotary
+branch — small values (e.g. `< 0.05`) flag genuine spectral peaks (an
+inertial oscillation, a tidal line) as distinct from noise, which
+`ci_ccw`/`ci_cw` alone cannot do (a wide confidence interval doesn't tell
+you whether a bump is signal or fluctuation).
 
 # References
 Gonella, J. (1972). A rotary-component method for analysing meteorological
 and oceanographic vector time series. Deep Sea Res., 19(12), 833–846.
+Thomson, D. J. (1982). Spectrum estimation and harmonic analysis.
+Proc. IEEE, 70(9), 1055–1096.
 
 Requires `using Multitaper` to be loaded — the real implementation lives in
 the ValToolsMultitaperExt package extension.
@@ -38,7 +49,8 @@ function rotary_spectrum(u::AbstractVector, v::AbstractVector;
                          nw::Real=4.0,
                          ntapers::Int=0,
                          ci::Bool=true,
-                         confidence::Real=0.95)
+                         confidence::Real=0.95,
+                         ftest::Bool=true)
     error("rotary_spectrum requires Multitaper.jl. Load it first: `using Multitaper`")
 end
 

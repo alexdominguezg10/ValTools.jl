@@ -10,7 +10,8 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
                          nw::Real=4.0,
                          ntapers::Int=0,
                          ci::Bool=true,
-                         confidence::Real=0.95)
+                         confidence::Real=0.95,
+                         ftest::Bool=true)
     length(u) == length(v) || error("u and v must have the same length")
     any(!isfinite, u) && error("u must not contain NaN/Inf")
     any(!isfinite, v) && error("v must not contain NaN/Inf")
@@ -42,16 +43,22 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
 
     S_ccw_k = Matrix{Float64}(undef, length(freqs_pos), K)
     S_cw_k = Matrix{Float64}(undef, length(freqs_pos), K)
+    W_ccw_k = Matrix{ComplexF64}(undef, length(freqs_pos), K)
+    W_cw_native_k = Matrix{ComplexF64}(undef, length(freqs_neg), K)
+    Hk0 = Vector{Float64}(undef, K)
 
     for k in 1:K
         taper = @view tapers[:, k]
+        Hk0[k] = sum(taper)
         w_k = (uf .* taper) .+ im .* (vf .* taper)
         W_k = fft(w_k)
         psd_k = (abs.(W_k) .^ 2) .* dt_hours ./ n
 
         S_ccw_k[:, k] = psd_k[pos_mask]
+        W_ccw_k[:, k] = W_k[pos_mask]
         S_cw_raw = psd_k[neg_mask][order]
         S_cw_k[:, k] = _interp1(freqs_neg, S_cw_raw, freqs_pos)
+        W_cw_native_k[:, k] = W_k[neg_mask][order]
     end
 
     S_ccw = vec(mean(S_ccw_k; dims=2))
@@ -64,13 +71,48 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
         ci_cw = _jackknife_ci(S_cw_k, confidence)
     end
 
+    ftest_ccw = nothing
+    ftest_cw = nothing
+    if ftest && K > 1
+        Fstat_ccw = _harmonic_fstat(W_ccw_k, Hk0)
+        ftest_ccw = _harmonic_fpval.(Fstat_ccw, K)
+
+        Fstat_cw_native = _harmonic_fstat(W_cw_native_k, Hk0)
+        Fstat_cw = _interp1(freqs_neg, Fstat_cw_native, freqs_pos)
+        ftest_cw = _harmonic_fpval.(Fstat_cw, K)
+    end
+
     rotary_coefficient = (S_ccw .- S_cw) ./ (S_ccw .+ S_cw)
 
     params = (nw=Float64(nw), ntapers=K, dt_hours=Float64(dt_hours),
               detrend=detrend, confidence=Float64(confidence), N=n)
 
     return ValTools.Types.RotarySpectralEstimate(freqs_pos, S_ccw, S_cw, ci_ccw, ci_cw,
-                                        rotary_coefficient, params)
+                                        rotary_coefficient, ftest_ccw, ftest_cw, params)
+end
+
+# Thomson (1982) harmonic F-test for a line component, applied to the
+# per-taper complex eigencoefficients `W_k` (nfreq x K) of a single rotary
+# branch. `Hk0[k] = sum(taper_k)` is the k-th DPSS taper's zero-frequency
+# response, shared between the CCW and CW branches (same taper set).
+function _harmonic_fstat(W_k::AbstractMatrix{<:Complex}, Hk0::AbstractVector{<:Real})
+    nfreq, K = size(W_k)
+    sum_Hk0_sq = sum(abs2, Hk0)
+    Fstat = Vector{Float64}(undef, nfreq)
+    for i in 1:nfreq
+        Chat = sum(Hk0[k] * W_k[i, k] for k in 1:K) / sum_Hk0_sq
+        resid = sum(abs2(W_k[i, k] - Chat * Hk0[k]) for k in 1:K)
+        Fstat[i] = resid > 0 ? (K - 1) * abs2(Chat) * sum_Hk0_sq / resid : Inf
+    end
+    return Fstat
+end
+
+# p-value for F ~ F(2, 2K-2) via the closed form for a Beta(1, K-1) CDF
+# (avoids a Distributions.jl dependency): if X ~ F(2, ν) then
+# 2X/(2X+ν) ~ Beta(1, ν/2), whose CDF is 1-(1-y)^(ν/2) for y in [0,1].
+function _harmonic_fpval(F::Real, K::Int)
+    isinf(F) && return 0.0
+    return (1 + F / (K - 1))^(-(K - 1))
 end
 
 function _jackknife_ci(S_k::AbstractMatrix{<:Real}, confidence::Real)

@@ -199,9 +199,11 @@ Multitaper (DPSS) rotary CW/CCW decomposition, requires `using Multitaper`
 [`Types.RotarySpectralEstimate`](#12-type-system--polymorphic-dispatch-typesdispatch)
 with `freq`, `S_ccw` (counter-clockwise PSD, positive rotation), `S_cw`
 (clockwise PSD, near-inertial in NH), jackknife confidence intervals
-(`ci_ccw`/`ci_cw`), and `rotary_coefficient`. Also supports tuple
-destructuring `freqs, S_ccw, S_cw = rotary_spectrum(u, v)` for backward
-compatibility. See [examples/inertial_oscillation.jl](examples/inertial_oscillation.jl).
+(`ci_ccw`/`ci_cw`), a Thomson (1982) harmonic F-test for a line component
+in each branch (`ftest_ccw`/`ftest_cw`, p-values — small means "genuine
+peak, not noise"; pass `ftest=false` to skip), and `rotary_coefficient`.
+Also supports tuple destructuring `freqs, S_ccw, S_cw = rotary_spectrum(u, v)`
+for backward compatibility. See [examples/inertial_oscillation.jl](examples/inertial_oscillation.jl).
 
 ### rotary_coherence
 
@@ -850,6 +852,17 @@ eddy actually spin down, rather than reading off an average.
 ```julia
 result = rotary_ridge(u, v; dt=1.0, nv=8)
 # result.amp_ccw tracks the true exponential decay envelope almost exactly
+```
+
+A ridge alone doesn't say whether it's a real feature or the strongest
+fluctuation pure noise could produce over a record this long.
+`wavelet_significance` answers that with a Monte Carlo noise threshold
+(white or AR(1)/red background), and `ridge_significant` applies it
+directly to `ridgemap`/`rotary_ridge` output:
+
+```julia
+sig_level, fs = wavelet_significance(x; dt=1.0, background=:red)
+flags = ridge_significant(ridge_freq, ridge_amp, sig_level, fs)
 ```
 
 ### [Unit-safe model-vs-observation validation](examples/unit_safe_validation.jl)

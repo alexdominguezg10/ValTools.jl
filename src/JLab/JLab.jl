@@ -78,6 +78,8 @@ and acknowledge the jLab toolbox. See ATTRIBUTION.md for exact citations.
 - `ridgemap()` — Identify and map wavelet ridges
 - `ridgechains()` — Connect ridge points into continuous chains
 - `ridgewalk()` — Follow ridge paths through time-frequency plane
+- `wavelet_significance()` — Monte Carlo noise threshold for ridge amplitudes
+- `ridge_significant()` — Flag which ridge points clear that threshold
 
 ### Spectral Analysis
 - `spectral_multitaper()` — Multitaper power spectral density (new, GPU-capable!)
@@ -105,7 +107,7 @@ and acknowledge the jLab toolbox. See ATTRIBUTION.md for exact citations.
 """
 module JLab
 
-using LinearAlgebra, Statistics, FFTW, SpecialFunctions
+using LinearAlgebra, Statistics, FFTW, SpecialFunctions, Random
 using ..Metrics
 
 # Include submodules
@@ -119,7 +121,7 @@ include("jdata.jl")
 # Re-export key functions for convenience
 export wavetrans, wavetrans_batch, tiredecode, transmax,
        morsewave, morsewave_freq, morsefreq, morseprops, morsespace,
-       ridgemap, ridgechains, RidgeEvent,
+       ridgemap, ridgechains, RidgeEvent, wavelet_significance, ridge_significant,
        spectral_multitaper, mspec, sleptap,
        ellipsefit, rotary, rotary_wavetrans, rotary_ridge,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,
