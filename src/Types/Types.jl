@@ -14,6 +14,7 @@ oceanographic validation workflows.
 - `SpectralEstimate{Q<:Number}`: Power spectral density with uncertainties
 - `RotarySpectralEstimate`: Rotary (CW/CCW) spectral decomposition with uncertainties
 - `RotaryCoherenceEstimate`: Rotary cross-spectral coherence between two velocity series
+- `CrossSpectralEstimate`: Multitaper cross-spectrum/coherence between two real time series
 - `ColocatedObservation`: Model-obs colocation result
 - `ObsMetadata`: Structured metadata (source, QC, location, etc.)
 
@@ -31,6 +32,6 @@ using Unitful
 include("types_def.jl")
 
 export TimeSeriesVector, TimeSeriesMatrix, SpectralEstimate, RotarySpectralEstimate,
-       RotaryCoherenceEstimate, ColocatedObservation, ObsMetadata
+       RotaryCoherenceEstimate, CrossSpectralEstimate, ColocatedObservation, ObsMetadata
 
 end # module

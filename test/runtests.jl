@@ -197,6 +197,40 @@ using Multitaper
         @test mean(rc_noise.coh_cw .> rc_noise.significance_level) < 0.25
     end
 
+    @testset "cross_coherence — real (non-rotary) signals" begin
+        Random.seed!(11)
+        n = 512
+        t = collect(0.0:n-1)
+        f0 = 0.08
+
+        # Two real series sharing a common oscillation + independent noise
+        x = cos.(2π * f0 .* t) .+ 0.2 .* randn(n)
+        y = cos.(2π * f0 .* t) .+ 0.2 .* randn(n)
+
+        cc = cross_coherence(x, y; dt=1.0)
+        @test cc isa ValTools.CrossSpectralEstimate
+        @test length(cc.freq) == length(cc.cross_power) == length(cc.coherence) == length(cc.phase)
+        @test all(0.0 .<= cc.coherence .<= 1.0)
+        @test all(-π .<= cc.phase .<= π)
+        @test 0.0 < cc.significance_level < 1.0
+
+        peak_idx = argmin(abs.(cc.freq .- f0))
+        @test cc.coherence[peak_idx] > cc.significance_level
+        # Same-phase cosines at f0 -> near-zero cross-spectral phase there
+        @test abs(cc.phase[peak_idx]) < 0.3
+
+        # Independent white noise: coherence should mostly stay below significance
+        x2, y2 = randn(n), randn(n)
+        cc_noise = cross_coherence(x2, y2; dt=1.0)
+        @test mean(cc_noise.coherence .> cc_noise.significance_level) < 0.25
+
+        # detrend="none" should error on garbage detrend string, matching rotary_coherence
+        @test_throws ErrorException cross_coherence(x, y; detrend="bogus")
+
+        # mismatched lengths
+        @test_throws ErrorException cross_coherence(x, y[1:end-1])
+    end
+
     @testset "alongtrack_wavenumber_spectrum" begin
         n = 512
         dx = 2.0  # km

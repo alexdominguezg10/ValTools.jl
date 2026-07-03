@@ -90,6 +90,50 @@ function rotary_coherence(u1::AbstractVector, v1::AbstractVector,
     error("rotary_coherence requires Multitaper.jl. Load it first: `using Multitaper`")
 end
 
+"""
+    cross_coherence(x, y; dt=1.0, detrend="linear", nw=4.0, ntapers=0, confidence=0.95)
+
+Multitaper cross-spectral coherence between two ordinary real time series
+`x` and `y` — the non-rotary counterpart of [`rotary_coherence`](@ref) for
+scalar records (e.g. two SST time series, a wind stress and a current
+component, two current-meter records at different depths) rather than
+complex velocity. Uses the same DPSS-tapered cross-periodogram averaging
+as `rotary_coherence`, without the CW/CCW split.
+
+# Arguments
+- `x`, `y`: real time series of equal length
+- `dt`: sampling interval (any consistent time unit)
+- `detrend`: `"none"`, `"constant"`, or `"linear"` (default `"linear"`)
+- `nw`: DPSS time-bandwidth product (default 4.0)
+- `ntapers`: number of tapers (default: `2*floor(nw) - 1`)
+- `confidence`: confidence level for `significance_level` (default 0.95)
+
+# Returns
+A [`Types.CrossSpectralEstimate`](@ref) with fields `freq`, `cross_power`,
+`coherence`, `phase`, `significance_level`, `params`.
+
+The significance level follows the standard multitaper result for the null
+distribution of magnitude-squared coherence with `K` tapers (Thomson & Chave
+1991; Percival & Walden 1993, §8.13): critical value `1 - (1-confidence)^(1/(K-1))`.
+Coherence values above this line are unlikely to arise from independent
+(zero true coherence) signals.
+
+# References
+Percival, D. B. & Walden, A. T. (1993). Spectral Analysis for Physical
+Applications. Cambridge University Press, §8.13.
+
+Requires `using Multitaper` to be loaded — the real implementation lives in
+the ValToolsMultitaperExt package extension.
+"""
+function cross_coherence(x::AbstractVector, y::AbstractVector;
+                         dt::Real=1.0,
+                         detrend::String="linear",
+                         nw::Real=4.0,
+                         ntapers::Int=0,
+                         confidence::Real=0.95)
+    error("cross_coherence requires Multitaper.jl. Load it first: `using Multitaper`")
+end
+
 
 """
     alongtrack_wavenumber_spectrum(ssh_track, dx_km; detrend="linear", window="hann")

@@ -191,12 +191,42 @@ metrics.
 ### rotary_spectrum
 
 ```julia
-freqs, S_ccw, S_cw = rotary_spectrum(u, v; dt_hours=1.0, detrend="linear", window="hann")
+spec = rotary_spectrum(u, v; dt_hours=1.0, detrend="linear", nw=4.0, ntapers=0, ci=true, confidence=0.95)
 ```
 
-- `freqs`: positive frequencies [cycles/hour]
-- `S_ccw`: counter-clockwise PSD (positive rotation)
-- `S_cw`: clockwise PSD (near-inertial in NH)
+Multitaper (DPSS) rotary CW/CCW decomposition, requires `using Multitaper`
+(implemented in `ValToolsMultitaperExt`). Returns a
+[`Types.RotarySpectralEstimate`](#12-type-system--polymorphic-dispatch-typesdispatch)
+with `freq`, `S_ccw` (counter-clockwise PSD, positive rotation), `S_cw`
+(clockwise PSD, near-inertial in NH), jackknife confidence intervals
+(`ci_ccw`/`ci_cw`), and `rotary_coefficient`. Also supports tuple
+destructuring `freqs, S_ccw, S_cw = rotary_spectrum(u, v)` for backward
+compatibility. See [examples/inertial_oscillation.jl](examples/inertial_oscillation.jl).
+
+### rotary_coherence
+
+```julia
+rc = rotary_coherence(u1, v1, u2, v2; dt_hours=1.0, nw=4.0, confidence=0.95)
+```
+
+Multitaper CW/CCW cross-coherence between two velocity series (e.g. model
+vs. observed currents), applying the CW/CCW split to each series
+separately. Returns a `Types.RotaryCoherenceEstimate` with `coh_ccw`,
+`coh_cw`, `phase_ccw`, `phase_cw`, and `significance_level` (critical
+coherence value above which the null hypothesis of no true coherence is
+rejected). Requires `using Multitaper`.
+
+### cross_coherence
+
+```julia
+cc = cross_coherence(x, y; dt=1.0, nw=4.0, confidence=0.95)
+```
+
+The non-rotary counterpart of `rotary_coherence`, for two ordinary real
+time series (e.g. two SST records, a wind stress and a current
+component) — no CW/CCW split. Returns a `Types.CrossSpectralEstimate`
+with `freq`, `cross_power`, `coherence`, `phase`, `significance_level`.
+Requires `using Multitaper`.
 
 ### alongtrack_wavenumber_spectrum
 

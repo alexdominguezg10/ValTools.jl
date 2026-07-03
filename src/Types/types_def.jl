@@ -172,6 +172,34 @@ struct RotaryCoherenceEstimate
 end
 
 """
+    CrossSpectralEstimate
+
+Multitaper cross-spectral estimate between two ordinary real time series
+`x` and `y`, as produced by [`cross_coherence`](@ref). The non-rotary
+counterpart of [`RotaryCoherenceEstimate`](@ref) — no CW/CCW split, since
+there's only one sense of "frequency" for a real-valued signal.
+
+# Fields
+- `freq`: positive frequency vector
+- `cross_power`: complex cross-spectrum `Sxy(f)`, averaged over tapers
+- `coherence`: magnitude-squared coherence `|Sxy|^2 / (Sxx*Syy)`, in `[0, 1]`
+- `phase`: cross-spectral phase (radians)
+- `significance_level`: critical coherence value above which `coherence`
+  is significantly nonzero at the requested confidence level, under the
+  null hypothesis of no true coherence (frequency-independent; `NaN` if
+  `ntapers <= 1`)
+- `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt, ...)
+"""
+struct CrossSpectralEstimate
+    freq::Vector{Float64}
+    cross_power::Vector{ComplexF64}
+    coherence::Vector{Float64}
+    phase::Vector{Float64}
+    significance_level::Float64
+    params::NamedTuple
+end
+
+"""
     ColocatedObservation
 
 Result of pairing a model [`TimeSeriesVector`](@ref) with an observational

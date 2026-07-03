@@ -5,6 +5,7 @@ Loaded automatically when both ValTools and Multitaper are in the environment
 (`using ValTools, Multitaper`). Provides the real implementations of:
 - `JLab.spectral_multitaper`, `JLab.mspec`, `JLab.sleptap`
 - `Metrics.rotary_spectrum`, `Metrics.rotary_coherence`
+- `Metrics.cross_coherence`
 
 Multitaper.jl is GPL-2.0-licensed. Isolating it behind this extension keeps
 the rest of ValTools.jl (including plotting-only environments that don't
@@ -24,9 +25,10 @@ const JL = ValTools.JLab
 const Met = ValTools.Metrics
 
 import ValTools.JLab: spectral_multitaper, mspec, sleptap
-import ValTools.Metrics: rotary_spectrum, rotary_coherence
+import ValTools.Metrics: rotary_spectrum, rotary_coherence, cross_coherence
 
 include("spectral_multitaper.jl")
 include("rotary_spectrum.jl")
+include("cross_coherence.jl")
 
 end # module
