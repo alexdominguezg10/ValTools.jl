@@ -88,15 +88,25 @@ function rmse(model::Types.TimeSeriesVector, obs::Types.TimeSeriesVector)
     return sqrt(Statistics.mean(diff .^ 2))
 end
 
+# Strip units from `a` and `b`, converting `b` to `a`'s unit first. Plain
+# `ustrip.(a), ustrip.(b)` is wrong whenever `a` and `b` carry different but
+# compatible units (e.g. m/s vs cm/s): each value would be stripped in its
+# own scale, silently comparing numbers that aren't on the same footing.
+function _stripped_common_unit(a, b)
+    ua = Unitful.unit(first(a))
+    return Unitful.ustrip.(a), Unitful.ustrip.(Unitful.uconvert.(ua, b))
+end
+
 """
     correlation(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
 
 Pearson correlation coefficient between `ts1.value` and `ts2.value`.
-Units are stripped before comparison (correlation is dimensionless and
-invariant to a shared unit rescaling).
+Units are converted to a common scale and stripped before comparison
+(correlation is dimensionless and invariant to a shared unit rescaling).
 """
 function correlation(ts1::Types.TimeSeriesVector, ts2::Types.TimeSeriesVector)
-    return Statistics.cor(Unitful.ustrip.(ts1.value), Unitful.ustrip.(ts2.value))
+    a, b = _stripped_common_unit(ts1.value, ts2.value)
+    return Statistics.cor(a, b)
 end
 
 """
@@ -108,9 +118,10 @@ A score of 1 is a perfect match; 0 means no better than the reference
 variance; negative means worse.
 """
 function skill_score(model::Types.TimeSeriesVector, obs::Types.TimeSeriesVector; ref=nothing)
-    mse = Statistics.mean((Unitful.ustrip.(model.value) .- Unitful.ustrip.(obs.value)) .^ 2)
+    m, o = _stripped_common_unit(model.value, obs.value)
+    mse = Statistics.mean((m .- o) .^ 2)
     if isnothing(ref)
-        ref_var = Statistics.var(Unitful.ustrip.(obs.value))
+        ref_var = Statistics.var(o)
     else
         ref_var = ref
     end
@@ -122,15 +133,20 @@ end
 
 Bundle of standard validation metrics between `model` and `obs`, returned
 as a `NamedTuple`: `(rmse, correlation, skill, bias)`. `rmse` carries units;
-`correlation`, `skill`, and `bias` are unitless (bias = mean(model - obs)
-with units stripped). Suitable for storing directly in
-[`ColocatedObservation`](@ref)'s `metrics` field.
+`correlation` and `skill` are dimensionless ratios (unaffected by which
+unit was used internally). `bias = mean(model - obs)` is a bare number
+expressed in **`model`'s unit** (obs is converted to match before
+subtracting) — if `model` and `obs` carry different-but-compatible units
+(e.g. cm/s vs m/s), remember to interpret `bias` against `model`'s unit,
+not `obs`'s. Suitable for storing directly in [`ColocatedObservation`](@ref)'s
+`metrics` field.
 """
 function validate(model::Types.TimeSeriesVector, obs::Types.TimeSeriesVector)
+    m, o = _stripped_common_unit(model.value, obs.value)
     return (
         rmse = rmse(model, obs),
         correlation = correlation(model, obs),
         skill = skill_score(model, obs),
-        bias = Statistics.mean(Unitful.ustrip.(model.value) .- Unitful.ustrip.(obs.value))
+        bias = Statistics.mean(m .- o)
     )
 end
