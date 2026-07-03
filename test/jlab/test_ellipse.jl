@@ -2,6 +2,7 @@ using Test
 using Random
 using Statistics
 using ValTools.JLab
+using Multitaper
 
 Random.seed!(42)
 

@@ -5,8 +5,6 @@ using LinearAlgebra
 using FFTW
 using Random
 using DataFrames
-using SpecialFunctions: erfinv
-using Multitaper: dpss_tapers
 using ..Types
 
 include("stats.jl")

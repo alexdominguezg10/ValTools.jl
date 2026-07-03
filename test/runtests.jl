@@ -6,6 +6,7 @@ using Statistics
 using Random
 using NCDatasets
 using CairoMakie
+using Multitaper
 
 @testset "ValTools.jl" begin
 

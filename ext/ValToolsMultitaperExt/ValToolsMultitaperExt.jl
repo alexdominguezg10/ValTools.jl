@@ -1,0 +1,32 @@
+"""
+ValToolsMultitaperExt — Multitaper.jl-backed spectral estimation for ValTools
+
+Loaded automatically when both ValTools and Multitaper are in the environment
+(`using ValTools, Multitaper`). Provides the real implementations of:
+- `JLab.spectral_multitaper`, `JLab.mspec`, `JLab.sleptap`
+- `Metrics.rotary_spectrum`, `Metrics.rotary_coherence`
+
+Multitaper.jl is GPL-2.0-licensed. Isolating it behind this extension keeps
+the rest of ValTools.jl (including plotting-only environments that don't
+need multitaper spectral estimation) free of that dependency and its
+transitive version constraints.
+"""
+module ValToolsMultitaperExt
+
+using ValTools
+using Multitaper: multispec, dpss_tapers, MTSpectrum
+using Unitful
+using Statistics: mean
+using FFTW: fft
+using SpecialFunctions: erfinv
+
+const JL = ValTools.JLab
+const Met = ValTools.Metrics
+
+import ValTools.JLab: spectral_multitaper, mspec, sleptap
+import ValTools.Metrics: rotary_spectrum, rotary_coherence
+
+include("spectral_multitaper.jl")
+include("rotary_spectrum.jl")
+
+end # module

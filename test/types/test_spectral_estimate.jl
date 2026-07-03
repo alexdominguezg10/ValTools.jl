@@ -2,6 +2,7 @@ using Test
 using ValTools
 using ValTools.Types
 using ValTools.JLab
+using Multitaper
 using Unitful
 using Random
 
