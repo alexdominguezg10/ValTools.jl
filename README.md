@@ -26,6 +26,7 @@ using CairoMakie          # activates the plot extension (optional)
 8. [Plots (CairoMakie Extension)](#8-plots-cairomakie-extension)
 9. [Dependencies](#9-dependencies)
 12. [Type System & Polymorphic Dispatch (Types/Dispatch)](#12-type-system--polymorphic-dispatch-typesdispatch)
+13. [Examples Gallery](#13-examples-gallery)
 
 ---
 
@@ -780,6 +781,82 @@ mismatched time axes raise a plain `ErrorException`.
 
 See `test/types/` for the full test suite (construction, unit-preserving
 statistics, arithmetic error paths, and `SpectralEstimate` integration).
+
+---
+
+## 13. Examples Gallery
+
+Runnable, self-contained scripts in [`examples/`](examples/) — each one
+tells a small oceanographic story end to end: simulate something physical,
+ask ValTools.jl a real question about it, and look at the answer. Every
+script below was actually run to produce the figure shown; nothing here is
+hand-drawn.
+
+### [Detecting an inertial oscillation](examples/inertial_oscillation.jl)
+
+Positive frequencies of a complex velocity `w = u + iv` are
+counter-clockwise rotation; negative are clockwise. In the Northern
+Hemisphere, a free inertial oscillation is *always* CCW (Gonella 1972) — so
+a rotary spectrum can pull a 26.7-hour inertial signal out of a noisy
+current-meter record and tell you, quantitatively, which way it's
+spinning.
+
+![Inertial oscillation hodograph and rotary spectrum](examples/inertial_oscillation.png)
+
+```julia
+spec = rotary_spectrum(u, v; dt_hours=1.0)
+# rotary_coefficient ≈ +1.0 at the 26.7 h peak → purely CCW → inertial
+```
+
+### [Tracking an eddy's spin-down](examples/eddy_spindown.jl)
+
+A single rotary spectrum smears a *decaying* eddy's energy across many
+frequencies. `rotary_ridge` instead follows the instantaneous CCW
+amplitude and period through time using a wavelet transform — watching the
+eddy actually spin down, rather than reading off an average.
+
+![Eddy spin-down amplitude and period tracked by wavelet ridge](examples/eddy_spindown.png)
+
+```julia
+result = rotary_ridge(u, v; dt=1.0, nv=8)
+# result.amp_ccw tracks the true exponential decay envelope almost exactly
+```
+
+### [Unit-safe model-vs-observation validation](examples/unit_safe_validation.jl)
+
+The classic silent bug: comparing a model in m/s against a mooring in cm/s
+and getting a validation score that's wrong by 100×, with no error and no
+warning. `TimeSeriesVector` carries its unit in the data itself, so
+`Dispatch.validate` converts automatically for compatible units and raises
+`Unitful.DimensionError` immediately for incompatible ones — it cannot
+make that mistake.
+
+```julia
+result = Dispatch.validate(model, obs)   # model in cm/s, obs in m/s — no problem
+# RMSE: 0.036 m/s   Correlation: 0.998   Skill: 0.985
+```
+
+*This example is how we caught a real bug while writing it* — an earlier
+version of `skill_score`/`bias` stripped each series' units independently
+instead of converting to a common scale first, silently turning a skill
+score of `0.985` into `-10069`. Fixed in `Dispatch._stripped_common_unit`;
+see the script for the full story.
+
+### [Multitaper line detection: F-test vs. eyeballing the periodogram](examples/multitaper_line_detection.jl)
+
+A single periodogram is noisy enough that its highest bin isn't always the
+true signal frequency — sampling noise can nudge the visible peak one bin
+over. Thomson's (1982) multitaper F-test isn't fooled: it tests each
+frequency for a genuine coherent line component, not just "which bin looks
+tallest."
+
+![Multitaper spectrum with F-test-identified line](examples/multitaper_spectrum.png)
+
+```julia
+spec = spectral_multitaper(x, 1.0; nw=4.0, unit=u"m/s")
+line_peak = argmin(spec.ftest_pval)   # smallest p-value = the real line
+# lands exactly on the true frequency, even when the raw power peak doesn't
+```
 
 ---
 
