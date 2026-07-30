@@ -15,7 +15,12 @@ Typical workflow:
 - Lilly, J. M. & P. Perez-Brunius (2021). Extracting statistically significant
   eddy signals from large Lagrangian datasets using wavelet ridge analysis,
   with application to the Gulf of Mexico. Nonlinear Processes in Geophysics.
-  https://doi.org/10.5194/npg-28-181-2021
+  https://doi.org/10.5194/npg-28-181-2021 — motivates `eddy_census()`'s use
+  of wavelet ridges for eddy detection, but `eddy_census()` itself is a
+  fixed-threshold heuristic, not this paper's actual statistical
+  significance test (see the caveat on `eddy_census()` below). For a real
+  noise-based significance test on ridge amplitudes, see
+  [`wavelet_significance`](@ref)/[`ridge_significant`](@ref).
 - Thomson, D. J. (1982). Spectrum estimation and harmonic analysis.
 """
 
@@ -350,17 +355,30 @@ end
                 lat=25.0, nv=8, gamma=3.0, beta=8.0,
                 amp_thresh=0.05, min_duration=3.0, gpu=false)
 
-Detect coherent eddy-like events via wavelet ridge analysis.
+Detect coherent eddy-like events via wavelet ridge analysis: wavelet
+transform of complex velocity, extract ridges, filter by a fixed
+amplitude fraction and minimum duration.
 
-Uses the Lilly & Perez-Brunius (2021) approach: wavelet transform of
-complex velocity, extract ridges, filter by amplitude & duration.
+**This is a fixed-threshold heuristic, not a statistical significance
+test.** `amp_thresh` is an arbitrary fraction of the record's own peak
+amplitude — it has no relationship to a noise/null model, so it does not
+implement the actual significance criterion of Lilly & Perez-Brunius
+(2021), despite that paper motivating the ridge-based eddy-detection
+approach used here. That paper's real criterion is a frequency-dependent,
+duration-filtered comparison against a synthetic noise surrogate — a
+different (and more involved) test than a fixed amplitude cutoff.
+For an actual noise-based significance test on wavelet ridge amplitudes,
+use [`wavelet_significance`](@ref) (Monte Carlo white/red-noise threshold)
+with [`ridge_significant`](@ref), and filter this function's output
+against that instead of trusting `amp_thresh` alone.
 
 # Arguments
 - `u`, `v`: Velocity time series
 - `dt`: Sampling interval (hours)
 - `lat`: Latitude (for inertial frequency reference)
 - `nv`: Voices per octave
-- `amp_thresh`: Minimum ridge amplitude (fraction of max)
+- `amp_thresh`: Minimum ridge amplitude, as a fraction of the record's
+  peak amplitude (arbitrary threshold, not a significance level)
 - `min_duration`: Minimum eddy duration (in units of dt)
 - `gpu`: Use GPU
 
@@ -373,7 +391,8 @@ complex velocity, extract ridges, filter by amplitude & duration.
 - `"sense"`: `:cw` or `:ccw` (rotation sense)
 
 # References
-Lilly & Olhede (2009); Lilly & Perez-Brunius (2021, NPG)
+Lilly & Olhede (2009). Ridge-based eddy detection is inspired by, but does
+not implement, the significance test of Lilly & Perez-Brunius (2021, NPG).
 """
 function eddy_census(u::AbstractVector, v::AbstractVector, dt::Real;
                      lat::Real=25.0, nv::Int=8,
