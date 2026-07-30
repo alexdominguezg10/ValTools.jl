@@ -65,3 +65,26 @@ function Met.cross_coherence(x::AbstractVector{<:Real}, y::AbstractVector{<:Real
     return ValTools.Types.CrossSpectralEstimate(freqs_pos, Cxy, coherence, phase,
                                                 significance_level, params)
 end
+
+"""
+    cross_coherence(x::Types.TimeSeriesVector, y::Types.TimeSeriesVector; kwargs...)
+
+Typed overload of [`cross_coherence`](@ref): `dt` (in hours) is derived
+from `x.time` instead of being a required keyword. `x` and `y` must share
+the same time axis and be regularly sampled. Unlike the
+`rotary_spectrum`/`ellipse_polarization` typed overloads, `x` and `y` are
+stripped of units independently (not converted to a common one) —
+coherence/phase are unit-agnostic ratios and `x`/`y` need not even be the
+same physical quantity (e.g. wind stress vs. a current component).
+
+No same-signature stub exists in the main package for this method (see
+the NOTE in `Metrics/spectral.jl`) — without `using Multitaper`, calling
+this with `TimeSeriesVector` arguments raises a plain `MethodError`.
+"""
+function Met.cross_coherence(x::ValTools.Types.TimeSeriesVector, y::ValTools.Types.TimeSeriesVector; kwargs...)
+    x.time == y.time || error("cross_coherence: x and y must share the same time axis")
+    dt = _dt_hours_from_time(x.time)
+    xv = Unitful.ustrip.(x.value)
+    yv = Unitful.ustrip.(y.value)
+    return Met.cross_coherence(xv, yv; dt=dt, kwargs...)
+end

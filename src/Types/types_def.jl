@@ -59,6 +59,58 @@ struct TimeSeriesMatrix{Q<:Number}
 end
 
 """
+    TimeSeriesCollection{Q<:Number}
+
+Multiple time series that do **not** share a common time axis — e.g. Argo
+floats, NDBC stations, or RAFOS/CloudDrift drifters, each with its own
+independent timestamps. This is the ragged counterpart to
+[`TimeSeriesMatrix`](@ref) (which requires one shared time vector): use
+`TimeSeriesMatrix` when every series is sampled on the same clock (mooring
+depths, ensemble members), and `TimeSeriesCollection` when it isn't.
+Forcing ragged data into `TimeSeriesMatrix` would require resampling each
+series onto a common grid, silently altering the data just to fit the
+container — this type exists specifically to avoid that.
+
+# Fields
+- `series`: the individual `TimeSeriesVector`s, each with its own `.time`
+- `name`: human-readable label for the whole collection
+- `metadata`: free-form `NamedTuple`
+
+# Indexing
+`length(c)`, `c[i]` (positional), `c["station_id"]` (by `series[i].name`,
+errors if not found or not unique), and iteration are all supported.
+
+# Example
+```julia
+using Unitful, Dates
+t1 = Dates.now() .+ Dates.Second.(0:9)
+t2 = Dates.now() .+ Dates.Hour.(0:5)  # different sampling, different length
+c = TimeSeriesCollection([
+    TimeSeriesVector(t1, randn(10) * u"m/s", "42001", (;)),
+    TimeSeriesVector(t2, randn(6) * u"m/s", "42002", (;)),
+], "ndbc_wspd", (;))
+c["42001"]  # -> the first TimeSeriesVector
+```
+"""
+struct TimeSeriesCollection{Q<:Number}
+    series::Vector{TimeSeriesVector{Q}}
+    name::String
+    metadata::NamedTuple
+end
+
+Base.length(c::TimeSeriesCollection) = length(c.series)
+Base.getindex(c::TimeSeriesCollection, i::Integer) = c.series[i]
+Base.iterate(c::TimeSeriesCollection, state=1) =
+    state > length(c.series) ? nothing : (c.series[state], state + 1)
+
+function Base.getindex(c::TimeSeriesCollection, name::AbstractString)
+    matches = findall(ts -> ts.name == name, c.series)
+    isempty(matches) && error("No series named \"$name\" in TimeSeriesCollection \"$(c.name)\"")
+    length(matches) > 1 && error("Multiple series named \"$name\" in TimeSeriesCollection \"$(c.name)\" — names are not unique")
+    return c.series[only(matches)]
+end
+
+"""
     ObsMetadata
 
 Structured provenance/QC metadata for an observational dataset, kept
@@ -208,6 +260,63 @@ struct CrossSpectralEstimate
     coherence::Vector{Float64}
     phase::Vector{Float64}
     significance_level::Float64
+    params::NamedTuple
+end
+
+"""
+    EllipsePolarizationEstimate
+
+Frequency-domain polarization decomposition of a bivariate (u,v) velocity
+spectral matrix, as produced by [`ellipse_polarization`](@ref). Port of
+jLab's `jSpectral/polparams.m` + `jSpectral/specdiag.m` (Lilly), applied to
+the multitaper spectral matrix `S = [[Sxx, Sxy]; [conj(Sxy), Syy]]` built
+from the same per-taper machinery as [`CrossSpectralEstimate`](@ref).
+
+Unlike [`RotarySpectralEstimate`](@ref) (which decomposes into CW/CCW
+rotary power) this diagonalizes the full Hermitian spectral matrix into an
+elliptical eigenbasis — major/minor axis power and orientation — and
+separately reports Cartesian polarization ratios. `imag(beta)` is the same
+physical quantity as `RotarySpectralEstimate.rotary_coefficient` derived a
+different way (spectral-matrix eigendecomposition vs. direct CW/CCW power
+ratio); the two should agree, which is a useful independent correctness
+check on both implementations.
+
+# Fields
+- `freq`: positive frequency vector
+- `d1`: major-axis eigen-power spectrum (`d1 >= d2` by construction)
+- `d2`: minor-axis eigen-power spectrum
+- `theta`: ellipse orientation angle (radians), from `specdiag`
+- `nu`: secondary `specdiag` angle (relates to the circular/rotary phase of
+  the eigenbasis; `nu = 0` identically for a real (non-rotary) spectral
+  matrix, since `nu` requires a nonzero imaginary cross-term)
+- `P`: total polarization, `(d1-d2)/(d1+d2)`, in `[0, 1]`. `P = 0` for a
+  circular (unpolarized) signal, `P = 1` for a purely linear (rectilinear)
+  one.
+- `alpha`: Cartesian anisotropy `(Sxx-Syy)/(Sxx+Syy)`, in `[-1, 1]`
+- `beta`: complex `2*Sxy/(Sxx+Syy)`; `real(beta)` reflects the linear u-v
+  correlation orientation, `imag(beta)` is the rotary sense (matches
+  `RotarySpectralEstimate.rotary_coefficient`, see above)
+- `ci_d1`, `ci_d2`: `(lower, upper)` jackknife confidence bounds for
+  `d1`/`d2`, or `nothing`
+- `ci_P`: `(lower, upper)` jackknife confidence bounds for `P`, or
+  `nothing`. Orientation (`theta`) confidence intervals are not provided —
+  jackknifing an angle needs circular-statistics care near the wraparound
+  boundary that a plain linear jackknife doesn't handle correctly, and
+  that hasn't been implemented yet.
+- `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt_hours, ...)
+"""
+struct EllipsePolarizationEstimate
+    freq::Vector{Float64}
+    d1::Vector{Float64}
+    d2::Vector{Float64}
+    theta::Vector{Float64}
+    nu::Vector{Float64}
+    P::Vector{Float64}
+    alpha::Vector{Float64}
+    beta::Vector{ComplexF64}
+    ci_d1::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
+    ci_d2::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
+    ci_P::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     params::NamedTuple
 end
 

@@ -7,6 +7,7 @@ using Random
 using NCDatasets
 using CairoMakie
 using Multitaper
+using Unitful
 
 @testset "ValTools.jl" begin
 
@@ -258,6 +259,105 @@ using Multitaper
 
         # mismatched lengths
         @test_throws ErrorException cross_coherence(x, y[1:end-1])
+    end
+
+    @testset "ellipse_polarization — pure rectilinear (linear) signal" begin
+        n = 256
+        t = collect(0.0:n-1)
+
+        # Line along the u-axis: v == 0 exactly -> Syy == Sxy == 0
+        u = cos.(2π * 0.1 .* t)
+        v = zeros(n)
+        ep = ellipse_polarization(u, v; dt_hours=1.0)
+        @test ep isa ValTools.EllipsePolarizationEstimate
+        @test length(ep.freq) == length(ep.d1) == length(ep.d2) == length(ep.P)
+
+        peak_idx = argmax(ep.d1)
+        @test abs(ep.freq[peak_idx] - 0.1) < 0.02
+        # Fully polarized (rank-1 spectral matrix): P ~= 1, not 0
+        @test ep.P[peak_idx] > 0.99
+        @test ep.alpha[peak_idx] > 0.99          # all power on the u-axis
+        @test abs(ep.theta[peak_idx]) < 0.05      # orientation ~= 0 (u-axis)
+
+        # Line at 45 deg: u and v identical -> orientation should recover pi/4
+        u45 = cos.(2π * 0.1 .* t)
+        v45 = cos.(2π * 0.1 .* t)
+        ep45 = ellipse_polarization(u45, v45; dt_hours=1.0)
+        peak45 = argmax(ep45.d1)
+        @test ep45.P[peak45] > 0.99
+        @test abs(ep45.alpha[peak45]) < 0.05      # equal power on u and v
+        @test abs(ep45.theta[peak45] - π/4) < 0.05
+    end
+
+    @testset "ellipse_polarization — pure circular (rotary) signal, cross-checked against rotary_spectrum" begin
+        n = 256
+        t = collect(0.0:n-1)
+
+        # CCW rotation
+        u = cos.(2π * 0.1 .* t)
+        v = sin.(2π * 0.1 .* t)
+        ep = ellipse_polarization(u, v; dt_hours=1.0)
+        rs = rotary_spectrum(u, v; dt_hours=1.0, ci=false, ftest=false)
+
+        peak_idx = argmax(ep.d1)
+        # Fully polarized here too -- circular is NOT the P~=0 case (isotropic noise is)
+        @test ep.P[peak_idx] > 0.99
+        @test abs(ep.alpha[peak_idx]) < 0.05      # no Cartesian (linear) anisotropy
+        @test imag(ep.beta[peak_idx]) > 0.9       # strongly CCW
+
+        # Independent derivation cross-check: imag(beta) from the spectral-matrix
+        # eigendecomposition (this function) should match rotary_coefficient from
+        # the direct CW/CCW power-ratio derivation (rotary_spectrum.jl) at the
+        # same frequency, since both are the same physical quantity computed two
+        # genuinely different ways.
+        rs_peak = argmax(rs.S_ccw)
+        @test abs(ep.freq[peak_idx] - rs.freq[rs_peak]) < 1e-8
+        @test isapprox(imag(ep.beta[peak_idx]), rs.rotary_coefficient[rs_peak]; atol=0.02)
+
+        # CW rotation flips the sign
+        vcw = -sin.(2π * 0.1 .* t)
+        epcw = ellipse_polarization(u, vcw; dt_hours=1.0)
+        peak_cw = argmax(epcw.d1)
+        @test imag(epcw.beta[peak_cw]) < -0.9
+    end
+
+    @testset "ellipse_polarization — isotropic noise gives low P" begin
+        Random.seed!(21)
+        n = 512
+        u = randn(n)
+        v = randn(n)
+        ep = ellipse_polarization(u, v; dt_hours=1.0)
+        # Independent, equal-variance, uncorrelated noise: d1 ~= d2 on average,
+        # so P should be small (this is the genuine "unpolarized" case).
+        @test mean(ep.P) < 0.5
+        @test all(0.0 .<= ep.P .<= 1.0)
+    end
+
+    @testset "ellipse_polarization — jackknife CI and error handling" begin
+        Random.seed!(23)
+        n = 256
+        t = collect(0.0:n-1)
+        u = cos.(2π * 0.1 .* t) .+ 0.1 .* randn(n)
+        v = sin.(2π * 0.1 .* t) .+ 0.1 .* randn(n)
+
+        ep = ellipse_polarization(u, v; dt_hours=1.0)
+        @test ep.ci_d1 !== nothing
+        @test ep.ci_d2 !== nothing
+        @test ep.ci_P !== nothing
+        lo_d1, hi_d1 = ep.ci_d1
+        @test all(lo_d1 .<= ep.d1 .<= hi_d1)
+        lo_d2, hi_d2 = ep.ci_d2
+        @test all(lo_d2 .<= ep.d2 .<= hi_d2)
+        lo_P, hi_P = ep.ci_P
+        @test all(lo_P .<= ep.P .<= hi_P .+ 1e-8)
+        @test all(0.0 .<= lo_P) && all(hi_P .<= 1.0)
+
+        ep_noci = ellipse_polarization(u, v; dt_hours=1.0, ci=false)
+        @test ep_noci.ci_d1 === nothing
+        @test ep_noci.ci_d2 === nothing
+        @test ep_noci.ci_P === nothing
+
+        @test_throws ErrorException ellipse_polarization(u, v[1:end-1])
     end
 
     @testset "alongtrack_wavenumber_spectrum" begin
@@ -682,5 +782,286 @@ using Multitaper
         v = Float64.([-cos(π * i/20) * sin(π * j/25) for i in 1:40, j in 1:50])
         fig = plot_flow(u, v; lic_length=8, title="LIC+Streamlines test")
         @test fig isa Figure
+    end
+
+    # Regression tests for the `:sym in names(::DataFrame)` bug — DataFrames
+    # 1.x `names()` returns Vector{String}, so a Symbol is never `in` it and
+    # the check was always false. Fixed to `hasproperty(df, :sym)`.
+    @testset "ndbc_waves — :Hs column now actually reached" begin
+        path = tempname() * "_42001.txt"
+        write(path, "YY MM DD hh mm WVHT WSPD WDIR GST\n" *
+                     "2026 01 01 00 00 1.5 10.0 180 12.0\n" *
+                     "2026 01 01 01 00 1.6 10.5 185 12.5\n")
+        try
+            nd = NDBCLoader(path)
+            @test nd.stations == ["42001"]
+
+            waves = ndbc_waves(nd)
+            @test !isempty(waves)
+            @test haskey(waves, "42001")
+            @test hasproperty(waves["42001"], :Hs)
+            @test waves["42001"].Hs == [1.5, 1.6]
+
+            # ndbc_winds already used the string form and should be unaffected
+            winds = ndbc_winds(nd)
+            @test !isempty(winds)
+            @test hasproperty(winds["42001"], :wspd)
+        finally
+            rm(path; force=true)
+        end
+    end
+
+    @testset "rafos_velocity_estimates — no longer always empty" begin
+        df = DataFrame(float_id=["F1", "F1", "F2", "F2"],
+                       time=[DateTime(2026,1,1,0,0), DateTime(2026,1,2,0,0),
+                             DateTime(2026,1,1,0,0), DateTime(2026,1,2,0,0)],
+                       lon=[-90.0, -90.1, -91.0, -91.2],
+                       lat=[25.0, 25.1, 26.0, 26.2])
+        r = RAFOSLoader(df)  # bypasses the file-parsing outer constructor
+
+        vel = rafos_velocity_estimates(r)
+        @test !isempty(vel)
+        @test nrow(vel) == 2  # one 24h estimate per float, within the default [12,96]h window
+        @test hasproperty(vel, :u) && hasproperty(vel, :v) && hasproperty(vel, :speed)
+        @test all(isfinite, vel.speed)
+        @test Set(vel.float_id) == Set(["F1", "F2"])
+    end
+
+    @testset "RAFOSLoader outer constructor — bbox filter and :depth column now applied" begin
+        path = tempname() * ".csv"
+        write(path, "float_id,lon,lat,pressure\n" *
+                     "F1,-90.0,25.0,100.0\n" *
+                     "F1,-91.0,26.0,200.0\n" *
+                     "F2,-70.0,10.0,150.0\n")
+        try
+            # bbox = (lon_min, lat_min, lon_max, lat_max); F2's lon=-70 falls outside
+            rl = RAFOSLoader(path; bbox=(-95.0, 20.0, -85.0, 30.0))
+            @test hasproperty(rl.df, :depth)
+            @test all(isapprox.(rl.df.depth, rl.df.pressure .* 1.019716))
+            @test nrow(rl.df) == 2  # F2 dropped by the (now-working) bbox filter
+        finally
+            rm(path; force=true)
+        end
+    end
+
+    # Stage 2 of the typed-ingest plan: additive `_ts` accessors returning
+    # Types.TimeSeriesVector/Matrix/Collection alongside the existing raw
+    # accessors (which are left unchanged and still tested above).
+    @testset "ies_travel_time_ts" begin
+        path = tempname() * ".nc"
+        ds = NCDataset(path, "c")
+        defDim(ds, "n", 5)
+        defVar(ds, "time", collect(DateTime(2026,1,1):Hour(1):DateTime(2026,1,1,4)), ("n",))
+        v = defVar(ds, "tau", Float64, ("n",)); v[:] = [1.0, 1.1, 1.2, 1.15, 1.05]
+        v.attrib["units"] = "s"
+        close(ds)
+        try
+            loader = IESLoader(path; site="TEST1", depth=1000.0)
+            ts = ies_travel_time_ts(loader)
+            @test ts isa ValTools.TimeSeriesVector
+            @test Unitful.unit(ts.value[1]) == u"s"
+            @test length(ts.value) == 5
+            @test ts.time[1] == DateTime(2026,1,1)
+            close(loader)
+        finally
+            rm(path; force=true)
+        end
+    end
+
+    @testset "mooring_current_ts" begin
+        path = tempname() * ".nc"
+        ds = NCDataset(path, "c")
+        defDim(ds, "time", 4); defDim(ds, "depth", 3)
+        defVar(ds, "time", collect(DateTime(2026,1,1):Hour(6):DateTime(2026,1,1,18)), ("time",))
+        defVar(ds, "depth", [10.0, 50.0, 100.0], ("depth",))
+        um = defVar(ds, "u", Float64, ("time","depth")); um[:,:] = reshape(1.0:12.0, 4, 3)
+        vm = defVar(ds, "v", Float64, ("time","depth")); vm[:,:] = reshape(-1.0:-1:-12, 4, 3)
+        um.attrib["units"] = "m s-1"
+        close(ds)
+        try
+            loader = MooringCurrentLoader(path; site="M1")
+            res = mooring_current_ts(loader)
+            @test res.u isa ValTools.TimeSeriesMatrix
+            @test res.u.channels == ["10.0", "50.0", "100.0"]
+            @test Unitful.unit(res.u.value[1,1]) == u"m/s"
+            @test size(res.u.value) == (4, 3)
+            close(loader)
+        finally
+            rm(path; force=true)
+        end
+
+        # 1-D point meter (no depth dimension) collapses to a single channel
+        path1d = tempname() * ".nc"
+        ds1d = NCDataset(path1d, "c")
+        defDim(ds1d, "time", 4)
+        defVar(ds1d, "time", collect(DateTime(2026,1,1):Hour(6):DateTime(2026,1,1,18)), ("time",))
+        u1 = defVar(ds1d, "u", Float64, ("time",)); u1[:] = [1.0,2.0,3.0,4.0]
+        v1 = defVar(ds1d, "v", Float64, ("time",)); v1[:] = [-1.0,-2.0,-3.0,-4.0]
+        close(ds1d)
+        try
+            loader1d = MooringCurrentLoader(path1d; site="PT1")
+            res1d = mooring_current_ts(loader1d)
+            @test size(res1d.u.value) == (4, 1)
+            @test res1d.u.channels == ["0"]
+            close(loader1d)
+        finally
+            rm(path1d; force=true)
+        end
+
+        # Swapped (depth, time) axes must be caught, not silently misread
+        pathbad = tempname() * ".nc"
+        dsbad = NCDataset(pathbad, "c")
+        defDim(dsbad, "time", 4); defDim(dsbad, "depth", 3)
+        defVar(dsbad, "time", collect(DateTime(2026,1,1):Hour(6):DateTime(2026,1,1,18)), ("time",))
+        ub = defVar(dsbad, "u", Float64, ("depth","time")); ub[:,:] = reshape(1.0:12.0, 3, 4)
+        vb = defVar(dsbad, "v", Float64, ("depth","time")); vb[:,:] = reshape(-1.0:-1:-12, 3, 4)
+        close(dsbad)
+        try
+            loaderbad = MooringCurrentLoader(pathbad; site="BAD")
+            @test_throws ErrorException mooring_current_ts(loaderbad)
+            close(loaderbad)
+        finally
+            rm(pathbad; force=true)
+        end
+    end
+
+    @testset "ndbc_winds_ts" begin
+        path = tempname() * "_42001.txt"
+        write(path, "YY MM DD hh mm WSPD WDIR GST\n" *
+                     "2026 01 01 00 00 10.0 180 12.0\n" *
+                     "2026 01 01 01 00 10.5 185 12.5\n")
+        try
+            nd = NDBCLoader(path)
+            coll = ndbc_winds_ts(nd)
+            @test coll isa ValTools.TimeSeriesCollection
+            @test length(coll) == 1
+            s1 = coll["42001"]
+            @test s1.name == "42001"
+            @test Unitful.unit(s1.value[1]) == u"m/s"
+            @test Unitful.ustrip.(s1.value) == [10.0, 10.5]
+        finally
+            rm(path; force=true)
+        end
+
+        # No wind columns anywhere -> errors rather than an empty collection
+        path2 = tempname() * "_99999.txt"
+        write(path2, "YY MM DD hh mm WVHT\n2026 01 01 00 00 1.5\n")
+        try
+            nd2 = NDBCLoader(path2)
+            @test_throws ErrorException ndbc_winds_ts(nd2)
+        finally
+            rm(path2; force=true)
+        end
+    end
+
+    # Stage 3 of the typed-ingest plan: multi-series Dispatch methods
+    # (TimeSeriesMatrix / TimeSeriesCollection) and typed compute_metrics/
+    # taylor_stats. `Dispatch.` prefix needed since these names collide
+    # with Statistics' mean/std/var (imported separately above).
+    @testset "Dispatch — TimeSeriesMatrix validate (by-name, not by position)" begin
+        t = Dates.now() .+ Dates.Second.(0:99)
+        model = TimeSeriesMatrix(t, hcat(randn(100), randn(100), randn(100)) .* u"m/s",
+                                 ["10m", "50m", "100m"], "model", (;))
+        # obs built with channels in a DIFFERENT order than model
+        obs = TimeSeriesMatrix(t, hcat(Unitful.ustrip.(model.value[:,3]),
+                                        Unitful.ustrip.(model.value[:,1]),
+                                        Unitful.ustrip.(model.value[:,2])) .* u"m/s" .+ 0.05u"m/s",
+                               ["100m", "10m", "50m"], "obs", (;))
+
+        res = ValTools.Dispatch.validate(model, obs)
+        @test Set(keys(res)) == Set(["10m", "50m", "100m"])
+        for ch in ("10m", "50m", "100m")
+            @test isapprox(Unitful.ustrip(res[ch].rmse), 0.05; atol=1e-8)
+        end
+
+        bad = TimeSeriesMatrix(t, hcat(randn(100), randn(100)) .* u"m/s", ["10m", "10m"], "bad", (;))
+        @test_throws ErrorException ValTools.Dispatch.validate(bad, obs)
+    end
+
+    @testset "Dispatch — TimeSeriesCollection mean/validate (ragged, by-name)" begin
+        t1 = Dates.now() .+ Dates.Second.(0:49)
+        t2 = Dates.now() .+ Dates.Hour.(0:19)  # different length AND different clock
+        model_c = TimeSeriesCollection([
+            TimeSeriesVector(t1, (randn(50) .+ 5.0) .* u"m/s", "F1", (;)),
+            TimeSeriesVector(t2, (randn(20) .+ 2.0) .* u"m/s", "F2", (;)),
+        ], "model_floats", (;))
+        # obs built with series in swapped order relative to model_c
+        obs_c = TimeSeriesCollection([
+            TimeSeriesVector(t2, (Unitful.ustrip.(model_c["F2"].value) .+ 0.1) .* u"m/s", "F2", (;)),
+            TimeSeriesVector(t1, (Unitful.ustrip.(model_c["F1"].value) .+ 0.1) .* u"m/s", "F1", (;)),
+        ], "obs_floats", (;))
+
+        m = ValTools.Dispatch.mean(model_c)
+        @test Set(keys(m)) == Set(["F1", "F2"])
+
+        vres = ValTools.Dispatch.validate(model_c, obs_c)
+        @test Set(keys(vres)) == Set(["F1", "F2"])
+        for k in ("F1", "F2")
+            @test isapprox(Unitful.ustrip(vres[k].rmse), 0.1; atol=1e-8)
+        end
+    end
+
+    @testset "compute_metrics / taylor_stats — typed unit auto-convert" begin
+        n = 200
+        t3 = Dates.now() .+ Dates.Second.(0:n-1)
+        obsv = randn(n) .+ 5.0
+        obs_ts = TimeSeriesVector(t3, obsv .* u"m/s", "obs", (;))
+        model_ms = TimeSeriesVector(t3, (obsv .+ 0.02) .* u"m/s", "model_ms", (;))
+        # Same physical values as model_ms, expressed in cm/s -- this is the
+        # exact mixed-unit scenario commit 801b386 fixed for Dispatch;
+        # compute_metrics/taylor_stats must not reintroduce that bug class.
+        model_cms = TimeSeriesVector(t3, (obsv .+ 0.02) .* 100 .* u"cm/s", "model_cms", (;))
+
+        cm1 = compute_metrics(obs_ts, model_ms)
+        cm2 = compute_metrics(obs_ts, model_cms)
+        @test isapprox(cm1["rmse"], cm2["rmse"]; atol=1e-9)
+        @test isapprox(cm1["correlation"], cm2["correlation"]; atol=1e-9)
+
+        ts1 = taylor_stats(obs_ts, model_ms)
+        ts2 = taylor_stats(obs_ts, model_cms)
+        @test isapprox(ts1["rms_diff"], ts2["rms_diff"]; atol=1e-9)
+    end
+
+    @testset "Stage 4 — spectral estimators accept TimeSeriesVector" begin
+        n = 256
+        t = DateTime(2026,1,1) .+ Hour.(0:n-1)  # regular, dt = 1 hour
+        uv = cos.(2π * 0.1 .* (0:n-1)) .* u"m/s"
+        vv = sin.(2π * 0.1 .* (0:n-1)) .* u"m/s"
+        uts = TimeSeriesVector(t, uv, "u", (;))
+        vts = TimeSeriesVector(t, vv, "v", (;))
+
+        spec_typed = rotary_spectrum(uts, vts)
+        spec_raw = rotary_spectrum(Unitful.ustrip.(uv), Unitful.ustrip.(vv); dt_hours=1.0)
+        @test spec_typed.freq == spec_raw.freq
+        @test spec_typed.S_ccw == spec_raw.S_ccw
+
+        # v's SAME physical values reported in cm/s must recover the exact
+        # same spectrum after conversion to u's unit (m/s)
+        vv_cms = Unitful.ustrip.(vv) .* 100 .* u"cm/s"
+        vts_cms = TimeSeriesVector(t, vv_cms, "v_cms", (;))
+        spec_mixed = rotary_spectrum(uts, vts_cms)
+        @test isapprox(spec_mixed.S_ccw, spec_typed.S_ccw; rtol=1e-8)
+        @test isapprox(spec_mixed.S_cw, spec_typed.S_cw; rtol=1e-8)
+
+        # Mismatched time axes must error, not silently misalign
+        vts_shifted = TimeSeriesVector(t .+ Minute(1), vv, "v_shifted", (;))
+        @test_throws ErrorException rotary_spectrum(uts, vts_shifted)
+
+        # Irregular sampling must error, not silently average a dt
+        t_irr = copy(t); t_irr[end] += Hour(5)
+        uts_irr = TimeSeriesVector(t_irr, uv, "u_irr", (;))
+        vts_irr = TimeSeriesVector(t_irr, vv, "v_irr", (;))
+        @test_throws ErrorException rotary_spectrum(uts_irr, vts_irr)
+
+        # cross_coherence: x, y need not share a physical unit
+        x = TimeSeriesVector(t, (cos.(2π*0.08 .* (0:n-1)) .+ 0.2 .* randn(n)) .* u"m/s", "x", (;))
+        y = TimeSeriesVector(t, (cos.(2π*0.08 .* (0:n-1)) .+ 0.2 .* randn(n)) .* u"Pa", "y", (;))
+        cc = cross_coherence(x, y)
+        @test cc isa ValTools.CrossSpectralEstimate
+
+        # ellipse_polarization typed matches raw
+        ep_typed = ellipse_polarization(uts, vts)
+        ep_raw = ellipse_polarization(Unitful.ustrip.(uv), Unitful.ustrip.(vv); dt_hours=1.0)
+        @test ep_typed.d1 == ep_raw.d1
     end
 end

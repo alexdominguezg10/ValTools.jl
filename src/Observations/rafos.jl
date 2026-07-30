@@ -30,25 +30,25 @@ function RAFOSLoader(files::AbstractString;
     isempty(df) && return RAFOSLoader(df)
 
     for col in (:lon, :lat, :pressure)
-        col in names(df) || continue
+        hasproperty(df, col) || continue
         for fv in _RAFOS_FILL
             df[!, col] = replace(df[!, col], fv => NaN)
         end
     end
 
-    if :pressure in names(df)
+    if hasproperty(df, :pressure)
         df[!, :depth] = df.pressure .* _DEPTH_PER_DBAR_OBS
     end
 
-    if bbox !== nothing && :lon in names(df) && :lat in names(df)
+    if bbox !== nothing && hasproperty(df, :lon) && hasproperty(df, :lat)
         filter!(row -> row.lon >= bbox[1] && row.lon <= bbox[3] &&
                        row.lat >= bbox[2] && row.lat <= bbox[4], df)
     end
-    if date_range !== nothing && :time in names(df)
+    if date_range !== nothing && hasproperty(df, :time)
         t0, t1 = DateTime(date_range[1]), DateTime(date_range[2])
         filter!(row -> row.time >= t0 && row.time <= t1, df)
     end
-    if pressure_range !== nothing && :pressure in names(df)
+    if pressure_range !== nothing && hasproperty(df, :pressure)
         filter!(row -> isfinite(row.pressure) &&
                        row.pressure >= pressure_range[1] &&
                        row.pressure <= pressure_range[2], df)
@@ -65,7 +65,7 @@ end
 function rafos_velocity_estimates(r::RAFOSLoader;
                                   min_dt_hours::Real=12.0,
                                   max_dt_hours::Real=96.0)
-    :float_id in names(r.df) || return DataFrame()
+    hasproperty(r.df, :float_id) || return DataFrame()
     R_earth = 6371.0e3
 
     rows = NamedTuple[]

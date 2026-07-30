@@ -79,6 +79,34 @@ end
 compute_metrics(obs, model; kwargs...) =
     compute_metrics(vec(collect(Float64, obs)), vec(collect(Float64, model)); kwargs...)
 
+# Strip units, converting `model` to `obs`'s unit first -- same auto-convert
+# behavior already shipped in Dispatch._stripped_common_unit (the fix for
+# commit 801b386's cm/s-vs-m/s skill_score bug), not the "reject on
+# mismatch" design sketched in the original roadmap. Keeping this
+# consistent with the already-tested Dispatch behavior rather than
+# reintroducing the two-implementations-of-the-same-bug-class risk.
+function _stripped_to_obs_unit(obs_value, model_value)
+    ou = Unitful.unit(first(obs_value))
+    return Unitful.ustrip.(obs_value), Unitful.ustrip.(Unitful.uconvert.(ou, model_value))
+end
+
+"""
+    compute_metrics(obs::Types.TimeSeriesVector, model::Types.TimeSeriesVector; weights=nothing, prefix="")
+
+Typed overload for unit-tagged series. `model` is converted to `obs`'s
+unit before computing (see [`Dispatch._stripped_common_unit`](@ref) for
+the same convention on the single-metric `Dispatch` functions) -- a
+mismatched-but-compatible unit (e.g. cm/s vs m/s) is auto-converted, not
+rejected. All metrics keyed in `obs`'s unit's numeric scale, same as the
+plain-`Vector` method.
+"""
+function compute_metrics(obs::Types.TimeSeriesVector, model::Types.TimeSeriesVector;
+                         weights::Union{AbstractVector{<:Real}, Nothing}=nothing,
+                         prefix::String="")
+    ov, mv = _stripped_to_obs_unit(obs.value, model.value)
+    return compute_metrics(ov, mv; weights=weights, prefix=prefix)
+end
+
 
 """
     taylor_stats(obs, model)
@@ -94,6 +122,17 @@ function taylor_stats(obs, model)
         "correlation" => m["correlation"],
         "rms_diff"    => m["rmse_unbiased"],
     )
+end
+
+"""
+    taylor_stats(obs::Types.TimeSeriesVector, model::Types.TimeSeriesVector)
+
+Typed overload for unit-tagged series, same auto-convert-to-`obs`'s-unit
+convention as the typed [`compute_metrics`](@ref) above.
+"""
+function taylor_stats(obs::Types.TimeSeriesVector, model::Types.TimeSeriesVector)
+    ov, mv = _stripped_to_obs_unit(obs.value, model.value)
+    return taylor_stats(ov, mv)
 end
 
 

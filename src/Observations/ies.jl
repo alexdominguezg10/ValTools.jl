@@ -77,4 +77,26 @@ function ies_to_dataframe(r::IESLoader)
     return df
 end
 
+"""
+    ies_travel_time_ts(r::IESLoader) -> TimeSeriesVector
+
+Typed counterpart to [`ies_travel_time`](@ref): same data, wrapped as a
+unit-tagged `TimeSeriesVector` with decoded `DateTime` timestamps. Errors
+(rather than returning `nothing`/an undecoded time array) if the travel-time
+variable is missing or the file's time variable couldn't be decoded to
+`DateTime` -- see [`ValTools.Observations._require_datetime`](@ref).
+"""
+function ies_travel_time_ts(r::IESLoader)
+    tau = _obs_read_var_f64(r.ds, ("tau", "travel_time", "TRAVEL_TIME", "TAU"))
+    tau === nothing && error("ies_travel_time_ts: no travel-time variable found " *
+                              "(tried tau/travel_time/TRAVEL_TIME/TAU) at site $(r.site)")
+    time = _require_datetime(_obs_read_time(r.ds, ("time", "TIME")), "ies_travel_time_ts")
+
+    varname = _first_present_varname(r.ds, ("tau", "travel_time", "TRAVEL_TIME", "TAU"))
+    unit, raw_units = _var_units(r.ds, varname, u"s")
+
+    return Types.TimeSeriesVector(time, vec(Float64.(tau)) .* unit, r.site,
+                                  (source="IES", varname=varname, raw_units=raw_units))
+end
+
 Base.close(r::IESLoader) = close(r.ds)

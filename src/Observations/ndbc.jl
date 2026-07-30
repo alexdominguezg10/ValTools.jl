@@ -56,7 +56,7 @@ function ndbc_waves(r::NDBCLoader)
     result = Dict{String, DataFrame}()
     for stn in r.stations
         sub = ndbc_station(r, stn)
-        if :Hs in names(sub)
+        if hasproperty(sub, :Hs)
             result[stn] = select(sub, [:time, :Hs])
         end
     end
@@ -138,6 +138,40 @@ function _extract_station_id(filepath::String)
     bn = basename(filepath)
     m = match(r"(\d{5})", bn)
     return m !== nothing ? m[1] : splitext(bn)[1]
+end
+
+"""
+    ndbc_winds_ts(r::NDBCLoader) -> TimeSeriesCollection
+
+Typed counterpart to [`ndbc_winds`](@ref)'s wind-speed column: one
+`TimeSeriesVector` per station (named by station id), bundled as a
+`TimeSeriesCollection` since each NDBC station has its own independent
+timestamps -- there is no shared time axis across stations.
+
+NDBC's plain-text format carries no per-variable units metadata (unlike
+the NetCDF-backed loaders, there is no attribute to read), so `m/s` is
+used directly per NDBC's documented station format, not inferred from the
+data. Errors if no station yields a usable, DateTime-decoded wind-speed
+series.
+"""
+function ndbc_winds_ts(r::NDBCLoader)
+    # Built as Vector{Any} then narrowed below -- `Types.TimeSeriesVector[]`
+    # (the empty-literal idiom) creates a Vector of the ABSTRACT,
+    # unparametrized TimeSeriesVector type, which can never satisfy
+    # TimeSeriesCollection's `Vector{TimeSeriesVector{Q}}` constructor even
+    # after concrete elements are pushed into it.
+    raw = Any[]
+    for stn in r.stations
+        sub = ndbc_station(r, stn)
+        hasproperty(sub, :wspd) || continue
+        isempty(sub.time) && continue
+        eltype(sub.time) <: Dates.AbstractDateTime || continue
+        push!(raw, Types.TimeSeriesVector(Vector{DateTime}(sub.time), Float64.(sub.wspd) .* u"m/s",
+                                          stn, (source="NDBC",)))
+    end
+    isempty(raw) && error("ndbc_winds_ts: no station produced a usable wind-speed series")
+    series = [s for s in raw]  # narrows Vector{Any} -> concrete Vector{TimeSeriesVector{Q}}
+    return Types.TimeSeriesCollection(series, "ndbc_wspd", (;))
 end
 
 Base.close(r::NDBCLoader) = nothing

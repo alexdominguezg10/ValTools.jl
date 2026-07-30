@@ -91,6 +91,51 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
                                         rotary_coefficient, ftest_ccw, ftest_cw, params)
 end
 
+# Derive a uniform sampling interval (in hours) from timestamps, for the
+# TimeSeriesVector-based typed methods (rotary_spectrum, cross_coherence,
+# ellipse_polarization). Multitaper spectral estimation assumes uniform
+# sampling -- silently using e.g. the mean dt of an irregular series would
+# produce a spectrum with no fixed physical meaning, so irregular sampling
+# is a hard error here, not a warning or a silent average.
+function _dt_hours_from_time(time::AbstractVector{<:Dates.AbstractDateTime}; rtol::Real=1e-3)
+    length(time) >= 2 || error("need at least 2 timestamps to derive a sampling interval")
+    dts_ms = Float64.(Dates.value.(diff(time)))  # milliseconds
+    dt0 = dts_ms[1]
+    dt0 > 0 || error("non-increasing timestamps -- time must be sorted and strictly increasing")
+    maxdev = maximum(abs.(dts_ms .- dt0)) / dt0
+    maxdev <= rtol || error("irregularly sampled time axis (max relative deviation in " *
+                             "sampling interval = $(round(maxdev * 100, digits=2))%, tolerance = " *
+                             "$(rtol * 100)%) -- multitaper spectral estimation assumes uniform " *
+                             "sampling; resample onto a regular grid first")
+    return dt0 / (1000.0 * 3600.0)  # ms -> hours
+end
+
+"""
+    rotary_spectrum(u::Types.TimeSeriesVector, v::Types.TimeSeriesVector; kwargs...)
+
+Typed overload of [`rotary_spectrum`](@ref): `dt_hours` is derived from
+`u.time` instead of being a required keyword. `u` and `v` must share the
+same time axis (`u.time == v.time`) and be regularly sampled — multitaper
+spectral estimation assumes uniform sampling, so irregular timestamps
+error clearly (via [`_dt_hours_from_time`](@ref)) rather than silently
+averaging a `dt`. `v` is converted to `u`'s unit before both are stripped
+(same auto-convert convention as `Dispatch._stripped_common_unit`). All
+other keyword arguments (`detrend`, `nw`, `ntapers`, `ci`, `confidence`,
+`ftest`) pass straight through to the untyped method.
+
+No same-signature stub exists in the main package for this method (see
+the NOTE in `Metrics/spectral.jl`) — without `using Multitaper`, calling
+this with `TimeSeriesVector` arguments raises a plain `MethodError`.
+"""
+function Met.rotary_spectrum(u::ValTools.Types.TimeSeriesVector, v::ValTools.Types.TimeSeriesVector; kwargs...)
+    u.time == v.time || error("rotary_spectrum: u and v must share the same time axis")
+    dt_hours = _dt_hours_from_time(u.time)
+    uv = Unitful.ustrip.(u.value)
+    common_unit = Unitful.unit(first(u.value))
+    vv = Unitful.ustrip.(Unitful.uconvert.(common_unit, v.value))
+    return Met.rotary_spectrum(uv, vv; dt_hours=dt_hours, kwargs...)
+end
+
 # Thomson (1982) harmonic F-test for a line component, applied to the
 # per-taper complex eigencoefficients `W_k` (nfreq x K) of a single rotary
 # branch. `Hk0[k] = sum(taper_k)` is the k-th DPSS taper's zero-frequency

@@ -54,6 +54,17 @@ function rotary_spectrum(u::AbstractVector, v::AbstractVector;
     error("rotary_spectrum requires Multitaper.jl. Load it first: `using Multitaper`")
 end
 
+# NOTE: a `rotary_spectrum(u::Types.TimeSeriesVector, v::Types.TimeSeriesVector; ...)`
+# typed-stub method deliberately does NOT exist here. Unlike the
+# `AbstractVector` vs `AbstractVector{<:Real}` stub/extension split above
+# (two genuinely different signatures, so both can coexist), a stub taking
+# exactly `Types.TimeSeriesVector` would have the IDENTICAL signature to
+# the extension's real implementation -- Julia treats that as redefining
+# the same method, which errors during precompilation ("Method
+# overwriting is not permitted"). The typed method is defined only in
+# ValToolsMultitaperExt/rotary_spectrum.jl; without Multitaper loaded,
+# calling it raises a plain MethodError (no custom message, but not wrong).
+
 """
     rotary_coherence(u1, v1, u2, v2; dt_hours=1.0, detrend="linear", nw=4.0, ntapers=0, confidence=0.95)
 
@@ -145,6 +156,37 @@ function cross_coherence(x::AbstractVector, y::AbstractVector;
                          confidence::Real=0.95)
     error("cross_coherence requires Multitaper.jl. Load it first: `using Multitaper`")
 end
+
+# See the NOTE above rotary_coherence's stub: no same-signature typed
+# stub here either, for the identical reason. Defined only in
+# ValToolsMultitaperExt/cross_coherence.jl.
+
+"""
+    ellipse_polarization(u, v; dt_hours=1.0, detrend="linear", nw=4.0, ntapers=0, ci=true, confidence=0.95)
+
+Frequency-domain ellipse polarization decomposition of a bivariate (u,v)
+velocity time series. Port of jLab's `polparams`/`specdiag` (Lilly),
+applied to the same multitaper spectral matrix machinery used by
+[`cross_coherence`](@ref). See [`Types.EllipsePolarizationEstimate`](@ref)
+for the returned fields.
+
+`u` and `v` must be the same length and contain no NaN/Inf. Requires
+`using Multitaper` to be loaded — the real implementation lives in the
+ValToolsMultitaperExt package extension.
+"""
+function ellipse_polarization(u::AbstractVector, v::AbstractVector;
+                              dt_hours::Real=1.0,
+                              detrend::String="linear",
+                              nw::Real=4.0,
+                              ntapers::Int=0,
+                              ci::Bool=true,
+                              confidence::Real=0.95)
+    error("ellipse_polarization requires Multitaper.jl. Load it first: `using Multitaper`")
+end
+
+# Same NOTE as rotary_spectrum/cross_coherence above: no same-signature
+# typed stub here. Defined only in
+# ValToolsMultitaperExt/ellipse_polarization.jl.
 
 
 """

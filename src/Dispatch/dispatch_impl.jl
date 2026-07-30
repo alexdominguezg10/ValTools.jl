@@ -150,3 +150,101 @@ function validate(model::Types.TimeSeriesVector, obs::Types.TimeSeriesVector)
         bias = Statistics.mean(m .- o)
     )
 end
+
+# ── Multi-series validation (TimeSeriesMatrix / TimeSeriesCollection) ──
+#
+# Both containers hold several series identified by NAME (channel names on
+# TimeSeriesMatrix, each series' own .name on TimeSeriesCollection). Every
+# method below matches `model` against `obs` BY NAME, not by column/vector
+# position -- comparing entry i of one against entry i of the other is
+# silently wrong whenever the two were built or ordered independently
+# (e.g. two station lists that don't happen to share an iteration order).
+
+function _matched_names(a_names::AbstractVector{<:AbstractString}, b_names::AbstractVector{<:AbstractString})
+    length(unique(a_names)) == length(a_names) ||
+        error("duplicate names in first argument ($(a_names)) -- name-based matching is ambiguous")
+    length(unique(b_names)) == length(b_names) ||
+        error("duplicate names in second argument ($(b_names)) -- name-based matching is ambiguous")
+    common = intersect(a_names, b_names)
+    isempty(common) && error("no names in common between $(a_names) and $(b_names)")
+    return common
+end
+
+function _channel_series(tm::Types.TimeSeriesMatrix, name::AbstractString)
+    idx = findfirst(==(name), tm.channels)
+    idx === nothing && error("channel \"$name\" not found in $(tm.channels)")
+    return Types.TimeSeriesVector(tm.time, tm.value[:, idx], name, tm.metadata)
+end
+
+_collection_names(c::Types.TimeSeriesCollection) = [ts.name for ts in c.series]
+
+"""
+    mean/std/var(c::Types.TimeSeriesCollection)
+
+Per-series mean/std/var, as a `Dict` keyed by each series' `.name`.
+"""
+mean(c::Types.TimeSeriesCollection) = Dict(ts.name => mean(ts) for ts in c.series)
+std(c::Types.TimeSeriesCollection) = Dict(ts.name => std(ts) for ts in c.series)
+var(c::Types.TimeSeriesCollection) = Dict(ts.name => var(ts) for ts in c.series)
+
+for fn in (:rmse, :correlation)
+    @eval begin
+        """
+            $($fn)(model::Types.TimeSeriesMatrix, obs::Types.TimeSeriesMatrix)
+
+        Per-channel $($fn), matched by channel name. Returns a `Dict`
+        keyed by channel name.
+        """
+        function $fn(model::Types.TimeSeriesMatrix, obs::Types.TimeSeriesMatrix)
+            names = _matched_names(model.channels, obs.channels)
+            return Dict(name => $fn(_channel_series(model, name), _channel_series(obs, name)) for name in names)
+        end
+
+        """
+            $($fn)(model::Types.TimeSeriesCollection, obs::Types.TimeSeriesCollection)
+
+        Per-series $($fn), matched by series name (not position). Returns
+        a `Dict` keyed by series name.
+        """
+        function $fn(model::Types.TimeSeriesCollection, obs::Types.TimeSeriesCollection)
+            names = _matched_names(_collection_names(model), _collection_names(obs))
+            return Dict(name => $fn(model[name], obs[name]) for name in names)
+        end
+    end
+end
+
+function skill_score(model::Types.TimeSeriesMatrix, obs::Types.TimeSeriesMatrix; ref=nothing)
+    names = _matched_names(model.channels, obs.channels)
+    return Dict(name => skill_score(_channel_series(model, name), _channel_series(obs, name); ref=ref) for name in names)
+end
+
+function skill_score(model::Types.TimeSeriesCollection, obs::Types.TimeSeriesCollection; ref=nothing)
+    names = _matched_names(_collection_names(model), _collection_names(obs))
+    return Dict(name => skill_score(model[name], obs[name]; ref=ref) for name in names)
+end
+
+"""
+    validate(model::Types.TimeSeriesMatrix, obs::Types.TimeSeriesMatrix)
+
+Per-channel `(rmse, correlation, skill, bias)`, matched by channel name
+(not column position). Returns a `Dict{String,NamedTuple}` keyed by
+channel name; each value is the same bundle as the single-series
+[`validate`](@ref).
+"""
+function validate(model::Types.TimeSeriesMatrix, obs::Types.TimeSeriesMatrix)
+    names = _matched_names(model.channels, obs.channels)
+    return Dict(name => validate(_channel_series(model, name), _channel_series(obs, name)) for name in names)
+end
+
+"""
+    validate(model::Types.TimeSeriesCollection, obs::Types.TimeSeriesCollection)
+
+Per-series `(rmse, correlation, skill, bias)`, matched by each series'
+`.name` (not position -- ragged collections built independently, e.g.
+two station lists, have no reliable shared order). Returns a
+`Dict{String,NamedTuple}` keyed by series name.
+"""
+function validate(model::Types.TimeSeriesCollection, obs::Types.TimeSeriesCollection)
+    names = _matched_names(_collection_names(model), _collection_names(obs))
+    return Dict(name => validate(model[name], obs[name]) for name in names)
+end

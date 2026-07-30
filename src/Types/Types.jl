@@ -31,7 +31,8 @@ using Unitful
 
 include("types_def.jl")
 
-export TimeSeriesVector, TimeSeriesMatrix, SpectralEstimate, RotarySpectralEstimate,
-       RotaryCoherenceEstimate, CrossSpectralEstimate, ColocatedObservation, ObsMetadata
+export TimeSeriesVector, TimeSeriesMatrix, TimeSeriesCollection, SpectralEstimate,
+       RotarySpectralEstimate, RotaryCoherenceEstimate, CrossSpectralEstimate,
+       EllipsePolarizationEstimate, ColocatedObservation, ObsMetadata
 
 end # module
