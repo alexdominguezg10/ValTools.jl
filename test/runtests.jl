@@ -11,6 +11,13 @@ using Unitful
 
 @testset "ValTools.jl" begin
 
+    # Previously written but never actually run: test/types/runtests.jl
+    # (test_types/test_dispatch/test_unitful_ops/test_spectral_estimate)
+    # wasn't included anywhere, so `Pkg.test("ValTools")` silently skipped
+    # all of it. Each sub-file declares its own `using` statements and is
+    # self-contained.
+    include("types/runtests.jl")
+
     @testset "build_stretching" begin
         sc_r, Cs_r = build_stretching(32, 7.0, 0.0; vstretching=4)
         @test length(sc_r) == 32
