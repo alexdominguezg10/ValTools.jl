@@ -113,3 +113,16 @@ function spectral_multitaper_gpu(x::Union{Vector, Matrix}, dt::Real=1.0;
                                   detrend::String="linear", gpu::Bool=true)
     error("GPU spectral_multitaper requires CUDA.jl and Multitaper.jl. Load them first: `using CUDA, Multitaper`")
 end
+
+# Stub: overridden by ValToolsCUDAExt if CUDA is available. Deliberately
+# looser-typed (AbstractMatrix/AbstractVector) than the extension's
+# concrete Matrix{Float64}/Vector{Float64} override -- matching that exact
+# signature here would make Julia treat the two as the SAME method
+# (defined in two different modules), which precompilation rejects as
+# "Method overwriting is not permitted" even though the override is
+# working as intended. A looser stub signature keeps them as genuinely
+# distinct, non-conflicting methods.
+function spectral_multitaper_batch_gpu(X::AbstractMatrix, tapers::AbstractMatrix,
+                                        lambdas::AbstractVector, dt::Real, N_fft::Int)
+    error("GPU spectral_multitaper_batch_gpu requires CUDA.jl. Load it first: `using CUDA`")
+end

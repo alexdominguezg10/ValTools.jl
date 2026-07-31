@@ -24,7 +24,8 @@ using Multitaper: dpss_tapers
 
 const JL = ValTools.JLab
 
-import ValTools.JLab: _wavetrans_gpu, _wavetrans_batch_gpu
+import ValTools.JLab: _wavetrans_gpu, _wavetrans_batch_gpu,
+                      spectral_multitaper_gpu, spectral_multitaper_batch_gpu
 
 # ============================================================================
 # GPU WAVELET TRANSFORM — single signal

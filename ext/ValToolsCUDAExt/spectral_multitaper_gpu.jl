@@ -7,10 +7,10 @@ by batching all FFTs (across tapers × signals) in a single CUFFT call.
 
 import FFTW: fftfreq
 
-function spectral_multitaper_batch_gpu(X::Matrix{Float64},
-                                       tapers::Matrix{Float64},
-                                       lambdas::Vector{Float64},
-                                       dt::Real, N_fft::Int)
+function JL.spectral_multitaper_batch_gpu(X::Matrix{Float64},
+                                          tapers::Matrix{Float64},
+                                          lambdas::Vector{Float64},
+                                          dt::Real, N_fft::Int)
 
     N, M = size(X)
     K = length(lambdas)
@@ -74,10 +74,10 @@ MTSpectrum struct with fields:
 - `S`: power spectral density
 - `params`: MTParameters (nw, K, dt)
 """
-function spectral_multitaper_gpu(x::Union{Vector{Float64}, Matrix{Float64}},
-                                  dt::Real=1.0;
-                                  nw::Float64=4.0, ntapers::Int=0,
-                                  detrend::String="linear", gpu::Bool=true)
+function JL.spectral_multitaper_gpu(x::Union{Vector{Float64}, Matrix{Float64}},
+                                    dt::Real=1.0;
+                                    nw::Float64=4.0, ntapers::Int=0,
+                                    detrend::String="linear", gpu::Bool=true)
 
     # Handle both single signal (vector) and batch (matrix)
     if x isa Vector
@@ -111,8 +111,8 @@ function spectral_multitaper_gpu(x::Union{Vector{Float64}, Matrix{Float64}},
 
     # Call GPU function
     if gpu
-        freqs, psd = spectral_multitaper_batch_gpu(x_detrended, tapers,
-                                                    lambdas, dt, N_fft)
+        freqs, psd = JL.spectral_multitaper_batch_gpu(x_detrended, tapers,
+                                                       lambdas, dt, N_fft)
     else
         error("CPU path not yet implemented for batch")
     end

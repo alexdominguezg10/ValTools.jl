@@ -13,7 +13,7 @@ println("Test 1: CPU single signal")
 x = randn(256)
 t1 = @elapsed spec = spectral_multitaper(x)
 println("  Time: $(round(t1*1000; digits=1)) ms")
-println("  PSD: $(extrema(spec.S))")
+println("  PSD: $(extrema(spec.power))")
 
 # Test 2: CPU batch
 println("\nTest 2: CPU batch (5 signals)")
@@ -29,9 +29,13 @@ if CUDA.functional()
     tapers, lambdas = dpss_tapers(2048, 4.0, 6, :both)
     N_fft = 2^ceil(Int, log2(2*2048-1))
 
+    # Warm-up: first CUDA/CUFFT call in the process pays for context init +
+    # kernel compilation (same reason CPU "Test 1" above is inflated by JIT).
+    # Time the second call for a representative steady-state number.
+    ValTools.JLab.spectral_multitaper_batch_gpu(X_gpu, tapers, lambdas, 1.0, N_fft)
     t3 = @elapsed (freqs, psd) = ValTools.JLab.spectral_multitaper_batch_gpu(X_gpu, tapers, lambdas, 1.0, N_fft)
 
-    println("  Time: $(round(t3*1000; digits=1)) ms")
+    println("  Time (warm): $(round(t3*1000; digits=1)) ms")
     println("  PSD shape: $(size(psd))")
 
     # Speedup (scale CPU batch time to 10 signals)
