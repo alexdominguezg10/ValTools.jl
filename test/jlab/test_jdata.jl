@@ -45,4 +45,15 @@ using ValTools.JLab
             @test filesize(path) > 1_000_000  # should be several MB
         end
     end
+
+    # Only runs when the file is already cached locally (no network required)
+    cache_path = joinpath(homedir(), ".valtools", "jdata", "GulfDriftersOpen.nc")
+    if isfile(cache_path)
+        @testset "load_gulfdrifters includes time field" begin
+            result = load_gulfdrifters(; download=false)
+            @test haskey(result, :time)
+            @test length(result.time) == length(result.lon)
+            @test all(length(result.time[i]) == length(result.lon[i]) for i in 1:result.n_drifters)
+        end
+    end
 end

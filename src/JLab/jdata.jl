@@ -196,6 +196,7 @@ function _read_gulfdrifters(ds)
 
     lon_all = Float64.(ds["lon"][:])
     lat_all = Float64.(ds["lat"][:])
+    time_all = Float64.(ds["time"][:])
 
     # Velocity: u/v in cm/s → m/s, or complex cv
     if "cv" in var_names
@@ -220,25 +221,27 @@ function _read_gulfdrifters(ds)
     end
 
     n_drifters = length(num)
-    lon = Vector{Vector{Float64}}(undef, n_drifters)
-    lat = Vector{Vector{Float64}}(undef, n_drifters)
-    u   = Vector{Vector{Float64}}(undef, n_drifters)
-    v   = Vector{Vector{Float64}}(undef, n_drifters)
+    lon  = Vector{Vector{Float64}}(undef, n_drifters)
+    lat  = Vector{Vector{Float64}}(undef, n_drifters)
+    u    = Vector{Vector{Float64}}(undef, n_drifters)
+    v    = Vector{Vector{Float64}}(undef, n_drifters)
+    time = Vector{Vector{Float64}}(undef, n_drifters)
 
     idx = 1
     for i in 1:n_drifters
         n = num[i]
         rng = idx:idx+n-1
-        lon[i] = lon_all[rng]
-        lat[i] = lat_all[rng]
-        u[i]   = u_all[rng]
-        v[i]   = v_all[rng]
+        lon[i]  = lon_all[rng]
+        lat[i]  = lat_all[rng]
+        u[i]    = u_all[rng]
+        v[i]    = v_all[rng]
+        time[i] = time_all[rng]
         idx += n
     end
 
     ids = "id" in var_names ? Int.(ds["id"][:]) : collect(1:n_drifters)
 
-    return (lon=lon, lat=lat, u=u, v=v,
+    return (lon=lon, lat=lat, u=u, v=v, time=time,
             id=ids, n_drifters=n_drifters,
             source="GulfDriftersOpen.nc",
             citation=JDATA_CATALOG["gulfdrifters"].citation)
