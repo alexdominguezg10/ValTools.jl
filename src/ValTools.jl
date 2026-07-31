@@ -95,8 +95,20 @@ function plot_flow end
 function plot_field_panel end
 function animate_field_realtime end
 
+# Typed-struct plotting (Stage 4a): one function name per plot kind,
+# dispatching via multiple dispatch across the Types.jl structs it applies to.
+function plot_timeseries end
+function plot_spectrum end
+function plot_rotary_spectrum end
+function plot_rotary_coherence end
+function plot_cross_spectrum end
+function plot_ellipse_polarization end
+function plot_colocation end
+
 export taylor_diagram, plot_comparison_map, plot_timeseries_comparison,
        plot_wind_rose, plot_wind_rose_comparison, lic_texture, plot_lic,
-       plot_streamlines, plot_flow, plot_field_panel, animate_field_realtime
+       plot_streamlines, plot_flow, plot_field_panel, animate_field_realtime,
+       plot_timeseries, plot_spectrum, plot_rotary_spectrum, plot_rotary_coherence,
+       plot_cross_spectrum, plot_ellipse_polarization, plot_colocation
 
 end # module

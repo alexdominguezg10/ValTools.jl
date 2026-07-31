@@ -840,6 +840,53 @@ using Unitful
         @test fig isa Figure
     end
 
+    @testset "Stage 4a — typed plot recipes render without error" begin
+        Random.seed!(31)
+        n = 256
+        t = DateTime(2026, 1, 1) .+ Hour.(0:n-1)
+        uv = (cos.(2π * 0.1 .* (0:n-1)) .+ 0.05 .* randn(n)) .* u"m/s"
+        vv = (sin.(2π * 0.1 .* (0:n-1)) .+ 0.05 .* randn(n)) .* u"m/s"
+        uf, vf = Unitful.ustrip.(uv), Unitful.ustrip.(vv)
+
+        # TimeSeriesVector / TimeSeriesMatrix / TimeSeriesCollection
+        ts = TimeSeriesVector(t, uv, "u", (;))
+        fig_ts = plot_timeseries(ts)
+        @test fig_ts isa Figure
+        ax_ts = fig_ts.content[1]
+        @test occursin("m s", string(ax_ts.ylabel[]))  # unit string reaches the axis label
+
+        tm = TimeSeriesMatrix(t, hcat(uf, vf) .* u"m/s", ["u", "v"], "currents", (;))
+        @test plot_timeseries(tm) isa Figure
+
+        tc = TimeSeriesCollection([ts, TimeSeriesVector(t, vv, "v", (;))], "uv", (;))
+        @test plot_timeseries(tc) isa Figure
+
+        # SpectralEstimate
+        se = ValTools.JLab.spectral_multitaper(uf, 1.0; ntapers=5)
+        @test plot_spectrum(se) isa Figure
+
+        # RotarySpectralEstimate
+        rse = rotary_spectrum(uf, vf; dt_hours=1.0)
+        @test plot_rotary_spectrum(rse) isa Figure
+
+        # RotaryCoherenceEstimate
+        rce = rotary_coherence(uf, vf, uf .+ 0.1 .* randn(n), vf .+ 0.1 .* randn(n); dt_hours=1.0)
+        @test plot_rotary_coherence(rce) isa Figure
+
+        # CrossSpectralEstimate
+        cse = cross_coherence(uf, uf .+ 0.1 .* randn(n); dt=1.0)
+        @test plot_cross_spectrum(cse) isa Figure
+
+        # EllipsePolarizationEstimate (ci=true by default, exercises the CI ribbons)
+        epe = ellipse_polarization(uf, vf; dt_hours=1.0)
+        @test plot_ellipse_polarization(epe) isa Figure
+
+        # ColocatedObservation
+        obs_ts = TimeSeriesVector(t, uv .+ 0.02 .* randn(n) .* u"m/s", "obs", (;))
+        co = ValTools.ColocatedObservation(ts, obs_ts, 3.2, (rmse=0.05, correlation=0.98))
+        @test plot_colocation(co) isa Figure
+    end
+
     # Regression tests for the `:sym in names(::DataFrame)` bug — DataFrames
     # 1.x `names()` returns Vector{String}, so a Symbol is never `in` it and
     # the check was always false. Fixed to `hasproperty(df, :sym)`.
