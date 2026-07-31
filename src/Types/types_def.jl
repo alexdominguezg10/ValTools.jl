@@ -289,20 +289,33 @@ check on both implementations.
 - `nu`: secondary `specdiag` angle (relates to the circular/rotary phase of
   the eigenbasis; `nu = 0` identically for a real (non-rotary) spectral
   matrix, since `nu` requires a nonzero imaginary cross-term)
-- `P`: total polarization, `(d1-d2)/(d1+d2)`, in `[0, 1]`. `P = 0` for a
-  circular (unpolarized) signal, `P = 1` for a purely linear (rectilinear)
-  one.
+- `P`: total polarization, `(d1-d2)/(d1+d2)`, in `[0, 1]`. **Not** 0 for
+  circular vs. 1 for linear — `P ≈ 1` for BOTH a purely rectilinear
+  (back-and-forth on a line) signal AND a purely circular single-sense
+  rotary one (both are "fully polarized" states in the optics-polarization
+  sense this is borrowed from); `P ≈ 0` only for genuinely isotropic 2-D
+  noise (`d1 ≈ d2`). Linear vs. circular is distinguished by `alpha`
+  (real, Cartesian anisotropy, near 1 for linear/near 0 for circular) vs.
+  `imag(beta)` (rotary sense, near 0 for linear/near ±1 for circular), not
+  by `P` itself. (Corrected 2026-07-30 — an earlier draft of this
+  docstring had this backwards; verified against hand-traced formulas on
+  both cases, not just symbol manipulation.)
 - `alpha`: Cartesian anisotropy `(Sxx-Syy)/(Sxx+Syy)`, in `[-1, 1]`
 - `beta`: complex `2*Sxy/(Sxx+Syy)`; `real(beta)` reflects the linear u-v
   correlation orientation, `imag(beta)` is the rotary sense (matches
   `RotarySpectralEstimate.rotary_coefficient`, see above)
 - `ci_d1`, `ci_d2`: `(lower, upper)` jackknife confidence bounds for
   `d1`/`d2`, or `nothing`
-- `ci_P`: `(lower, upper)` jackknife confidence bounds for `P`, or
-  `nothing`. Orientation (`theta`) confidence intervals are not provided —
-  jackknifing an angle needs circular-statistics care near the wraparound
-  boundary that a plain linear jackknife doesn't handle correctly, and
-  that hasn't been implemented yet.
+- `ci_P`: `(lower, upper)` jackknife confidence bounds for `P`, or `nothing`
+- `ci_theta`: `(lower, upper)` confidence bounds for `theta`, or `nothing`.
+  Uses a **circular** jackknife (2026-07-30) — `theta`'s natural period is
+  `pi`, not `2*pi` (an ellipse's axis, not a directed vector), so
+  `2*theta` is jackknifed on the circle (resultant-vector circular mean,
+  signed-shortest-arc deviations) rather than with a plain arithmetic
+  mean/variance, which breaks down near the wraparound boundary. Bounds
+  are not re-wrapped into `theta`'s canonical `(-pi/2, pi/2]` range after
+  halving back — a wide interval genuinely means orientation is poorly
+  constrained (e.g. a near-isotropic signal), not an error.
 - `params`: free-form `NamedTuple` of estimation parameters (nw, ntapers, dt_hours, ...)
 """
 struct EllipsePolarizationEstimate
@@ -317,6 +330,7 @@ struct EllipsePolarizationEstimate
     ci_d1::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     ci_d2::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     ci_P::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
+    ci_theta::Union{Tuple{Vector{Float64},Vector{Float64}}, Nothing}
     params::NamedTuple
 end
 

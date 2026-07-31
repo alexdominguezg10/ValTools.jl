@@ -71,19 +71,22 @@ function Met.ellipse_polarization(u::AbstractVector{<:Real}, v::AbstractVector{<
     ci_d1 = nothing
     ci_d2 = nothing
     ci_P = nothing
+    ci_theta = nothing
     if ci && K > 1
         d1_del = Matrix{Float64}(undef, nfreq, K)
         d2_del = Matrix{Float64}(undef, nfreq, K)
         P_del = Matrix{Float64}(undef, nfreq, K)
+        theta_del = Matrix{Float64}(undef, nfreq, K)
         for k in 1:K
             idx = [j for j in 1:K if j != k]
             Sxx_del = vec(mean(view(Sxx_k, :, idx); dims=2))
             Syy_del = vec(mean(view(Syy_k, :, idx); dims=2))
             Sxy_del = vec(mean(view(Sxy_k, :, idx); dims=2))
-            d1_k, d2_k, _, _, P_k, _, _ = _ellipse_from_spectral_matrix(Sxx_del, Syy_del, Sxy_del)
+            d1_k, d2_k, theta_k, _, P_k, _, _ = _ellipse_from_spectral_matrix(Sxx_del, Syy_del, Sxy_del)
             d1_del[:, k] = d1_k
             d2_del[:, k] = d2_k
             P_del[:, k] = P_k
+            theta_del[:, k] = theta_k
         end
         # Linear (non-log) jackknife CI, not the log-transformed `_jackknife_ci`
         # from rotary_spectrum.jl: d1/d2 are spectral-matrix EIGENVALUES, not
@@ -95,13 +98,14 @@ function Met.ellipse_polarization(u::AbstractVector{<:Real}, v::AbstractVector{<
         ci_d1 = _jackknife_ci_linear(d1_del, confidence, 0.0, Inf)
         ci_d2 = _jackknife_ci_linear(d2_del, confidence, 0.0, Inf)
         ci_P = _jackknife_ci_linear(P_del, confidence, 0.0, 1.0)
+        ci_theta = _jackknife_ci_circular_half_angle(theta, theta_del, confidence)
     end
 
     params = (nw=Float64(nw), ntapers=K, dt_hours=Float64(dt_hours),
               detrend=detrend, confidence=Float64(confidence), N=n)
 
     return ValTools.Types.EllipsePolarizationEstimate(freqs_pos, d1, d2, theta, nu, P, alpha, beta,
-                                                       ci_d1, ci_d2, ci_P, params)
+                                                       ci_d1, ci_d2, ci_P, ci_theta, params)
 end
 
 """
@@ -165,5 +169,60 @@ function _jackknife_ci_linear(X_delete::AbstractMatrix{<:Real}, confidence::Real
 
     lower = clamp.(mbar .- half_width, lo, hi)
     upper = clamp.(mbar .+ half_width, lo, hi)
+    return (lower, upper)
+end
+
+# Circular jackknife CI for the ellipse orientation `theta`. A plain linear
+# jackknife (mean + sum-of-squared-deviations) is wrong for an angle: theta
+# wraps at the branch cut of atan2/2, so two delete-one estimates that are
+# physically nearly identical (e.g. theta=1.55 and theta=-1.55, ~0.04 rad
+# apart going the short way around) get treated as ~pi apart, producing a
+# huge, meaningless jackknife variance whenever the true orientation sits
+# near that boundary.
+#
+# Fix: theta's natural period is pi (an ellipse's axis, not a directed
+# vector), so `twoth = 2*theta` is the genuinely 2*pi-periodic quantity --
+# exactly the value atan2 already computes internally before halving in
+# `_ellipse_from_spectral_matrix`. Jackknife THAT on the circle (resultant-
+# vector circular mean; deviations as the signed shortest arc via
+# atan2(sin(d), cos(d)), not plain subtraction) using the same jackknife
+# variance formula as `_jackknife_ci_linear`, then halve back to theta's
+# domain. This is a standard circular-statistics jackknife (Fisher 1993,
+# "Statistical Analysis of Circular Data") -- same formula shape as the
+# ordinary jackknife, only the "distance" operator changes to respect the
+# periodic domain.
+#
+# Bounds are NOT re-wrapped into theta's canonical (-pi/2, pi/2] range after
+# halving -- a half-width approaching pi/2 (in theta's domain) genuinely
+# means orientation is poorly constrained (e.g. a near-isotropic signal, or
+# any noise-dominated frequency far from the actual spectral peak), and
+# forcing the reported interval back into a fixed window would silently
+# hide that. Interpret a very wide ci_theta as "orientation not resolved,"
+# not as an error.
+#
+# Centered on `theta_point` (the actual full-sample point estimate, from
+# ALL K tapers), not on the delete-one replicates' own circular mean --
+# found by testing: those two differ enough at some frequencies (nearly
+# degenerate/near-isotropic bins especially) that centering on the
+# delete-one mean occasionally produced a reported interval that didn't
+# bracket the point estimate it's supposedly a CI *for*. Centering on the
+# point estimate directly guarantees bracketing by construction (the
+# half-width is >= 0), while the delete-one replicates still supply an
+# honest circular-dispersion estimate for the width.
+function _jackknife_ci_circular_half_angle(theta_point::AbstractVector{<:Real},
+                                           theta_delete::AbstractMatrix{<:Real}, confidence::Real)
+    nfreq, K = size(theta_delete)
+    phi_point = 2.0 .* theta_point  # the genuinely 2*pi-periodic doubled angle
+    phi = 2.0 .* theta_delete
+
+    d = atan.(sin.(phi .- phi_point), cos.(phi .- phi_point))  # signed shortest-arc deviation from the point estimate
+    jkvar = ((K - 1) / K) .* vec(sum(d .^ 2; dims=2))
+
+    alpha = 1 - confidence
+    zval = sqrt(2) * erfinv(2 * (1 - alpha / 2) - 1)
+    half_width = zval .* sqrt.(jkvar)
+
+    lower = (phi_point .- half_width) ./ 2
+    upper = (phi_point .+ half_width) ./ 2
     return (lower, upper)
 end

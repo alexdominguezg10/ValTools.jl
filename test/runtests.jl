@@ -359,12 +359,61 @@ using Unitful
         @test all(lo_P .<= ep.P .<= hi_P .+ 1e-8)
         @test all(0.0 .<= lo_P) && all(hi_P .<= 1.0)
 
+        @test ep.ci_theta !== nothing
+        lo_th, hi_th = ep.ci_theta
+        @test all(lo_th .<= ep.theta .<= hi_th)
+
         ep_noci = ellipse_polarization(u, v; dt_hours=1.0, ci=false)
         @test ep_noci.ci_d1 === nothing
         @test ep_noci.ci_d2 === nothing
         @test ep_noci.ci_P === nothing
+        @test ep_noci.ci_theta === nothing
 
         @test_throws ErrorException ellipse_polarization(u, v[1:end-1])
+    end
+
+    @testset "ellipse_polarization — circular jackknife CI handles the theta wraparound" begin
+        # Direct, deterministic test of the circular-CI primitive itself:
+        # hand-crafted delete-one theta estimates that are a TIGHT physical
+        # cluster around the true value pi/2 (2*theta clusters around the
+        # +-pi branch cut), but which look maximally spread out to plain
+        # subtraction. A plain linear jackknife on these gives mean~=0
+        # (wrong by ~pi/2) and a ~13 rad width (4x a full circle) --
+        # meaningless. The circular jackknife must recover the true center
+        # exactly and a sane, bounded width.
+        # CI is centered on the point estimate (passed in explicitly), not
+        # the delete-one replicates' own circular mean -- guarantees
+        # bracketing by construction; the replicates only supply the width.
+        ext = Base.get_extension(ValTools, :ValToolsMultitaperExt)
+        theta_point = [1.55]
+        theta_del = reshape([1.50, 1.53, 1.56, -1.56, -1.53, -1.50], 1, 6)
+        lo, hi = ext._jackknife_ci_circular_half_angle(theta_point, theta_del, 0.95)
+        @test isapprox((lo[1] + hi[1]) / 2, 1.55; atol=1e-8)
+        @test lo[1] <= theta_point[1] <= hi[1]
+        @test (hi[1] - lo[1]) < 1.0  # sane -- a broken linear jackknife gives ~13.4 here
+
+        # Real end-to-end signal, true orientation placed EXACTLY at the
+        # theta=+-pi/2 boundary (a pure v-axis line: u is noise-only, v
+        # carries the signal), so per-taper delete-one estimates genuinely
+        # straddle the branch cut -- confirmed theta flips sign between
+        # adjacent frequency bins in this exact configuration.
+        Random.seed!(7)
+        n = 256
+        t = collect(0.0:n-1)
+        a_amp = cos.(2π * 0.1 .* t)
+        u_w = 0.3 .* randn(n)
+        v_w = a_amp .+ 0.3 .* randn(n)
+        ep_w = ellipse_polarization(u_w, v_w; dt_hours=1.0)
+        peak = argmax(ep_w.d1)
+        @test abs(abs(ep_w.theta[peak]) - pi/2) < 0.05  # true orientation recovered near the boundary
+        lo_w, hi_w = ep_w.ci_theta
+        @test all(isfinite, lo_w) && all(isfinite, hi_w)
+        @test all(lo_w .<= ep_w.theta .<= hi_w)  # CI must bracket the point estimate everywhere, always true by construction
+        # Sanity/tightness only asserted NEAR THE SIGNAL PEAK -- far from it
+        # (pure-noise frequency bins) orientation is genuinely undetermined,
+        # and a wide CI there is the correct answer, not a bug.
+        near_peak = max(1, peak - 3):min(length(ep_w.freq), peak + 3)
+        @test all((hi_w[near_peak] .- lo_w[near_peak]) .< 1.0)
     end
 
     @testset "alongtrack_wavenumber_spectrum" begin
