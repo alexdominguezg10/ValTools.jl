@@ -43,10 +43,38 @@ polarization/coherence metrics → typed plotting), started 2026-07-02.
   typed structs above, with axis labels generated from Unitful units.
 - **New observation loaders**: CloudDrift, Glider.
 - Examples gallery (Oceananigans-style).
-- `scripts/validate_gulfdrifters.jl` — GulfDrifters (Lilly & Perez-Brunius
-  2021) baseline validation: eddy census counts, mesoscale kinetic-energy
-  fraction, and mean rotary coefficient, against the public
-  GulfDriftersOpen dataset.
+- `scripts/validate_gulfdrifters.jl` — GulfDrifters (Lilly & Pérez-Brunius
+  2021) baseline validation using `eddy_census()`'s existing fixed-threshold
+  heuristic: eddy census counts, mesoscale kinetic-energy fraction, and mean
+  rotary coefficient, against the public GulfDriftersOpen dataset (2684/2731
+  usable drifters). **2804 events, 51 longest-subset (≥180d) events, 54.4%
+  mesoscale KE fraction, −0.228 mean rotary coefficient.**
+- `scripts/validate_gulfdrifters_significant.jl` — a second GulfDrifters
+  validation combining `eddy_census`'s ridge-chaining with
+  `wavelet_significance()`/`ridge_significant()` (genuine Monte Carlo
+  noise-surrogate significance testing, as `eddy_census`'s own docstring
+  recommends, rather than a fixed amplitude threshold). Runs on a
+  fixed-seed 150-drifter subsample (full census not practical — calibrated
+  at ~10s/drifter). **466 significant events (3.11/drifter) with
+  `background=:red`**, the noise model adopted as default after a
+  same-subsample comparison against `background=:white` (787 events,
+  5.25/drifter) — red noise is the more defensible null model for
+  reddish oceanographic background turbulence, matching a direct
+  observation in Lilly & Pérez-Brunius (2021) Sect. 4.3 that white noise
+  generates more spurious ridges than red.
+  - **None of these numbers should be read as "the" GulfDrifters baseline.**
+    They aren't comparable to each other (different method, and the
+    significance-test number is a 150-drifter subsample, not a full
+    census) or to the paper's own published result: Lilly & Pérez-Brunius
+    (2021), Sect. 4.7, report **1033 statistically significant ridges**
+    (41% of 2520 non-inertial) on their full, partly-proprietary
+    `GulfDriftersAll` dataset (3770 drifters — larger than our public
+    2731-drifter `GulfDriftersOpen` subset) using a proper density-ratio
+    significance criterion (ρ_X = L·ξ̄⁴ against noise-surrogate survival
+    functions) that neither script here implements. The paper's own
+    published eddy census (GOMED, Zenodo DOI `10.5281/zenodo.3978803`) is
+    access-restricted; access was requested but not granted as of this
+    release. Revisit once available.
 
 ### Changed
 
@@ -71,16 +99,50 @@ polarization/coherence metrics → typed plotting), started 2026-07-02.
 - `EllipsePolarizationEstimate.P` docstring had the circular-vs-linear
   interpretation backwards (`P≈1` for *both* rectilinear and circular
   signals, not one or the other; `P≈0` only for isotropic noise).
+- **`spectral_multitaper_batch_gpu` was completely unreachable** — flagged
+  as "has an issue" since Phase 2 but never diagnosed. Root cause: it was
+  defined as a bare, unqualified function inside `ValToolsCUDAExt`'s own
+  module instead of extending `ValTools.JLab` via `JL.` qualification (the
+  pattern every other GPU function in that extension correctly uses), so
+  `ValTools.JLab.spectral_multitaper_batch_gpu` genuinely didn't exist.
+  Fixed by adding a stub in `src/JLab/spectral.jl` and requalifying both
+  GPU spectral functions as `JL.spectral_multitaper_gpu`/
+  `JL.spectral_multitaper_batch_gpu`. Note for anyone touching this
+  pattern again: the stub must be **loosely typed**
+  (`AbstractMatrix`/`AbstractVector`), not matching the extension's
+  concrete `Matrix{Float64}` signature exactly — an identical signature
+  makes Julia treat the override as an illegal same-method redefinition
+  across modules, rejected at precompilation even though it works at
+  runtime. **Verified on Ixachi (H200): 46.2× GPU speedup** (warm timing,
+  2048×10 batch), clearing the roadmap's "15× GPU maintained" target.
+- `test_gpu_final.jl` referenced a stale `spec.S` field (renamed `.power`
+  in the Phase 2 type refactor) and had no GPU warm-up call before timing
+  (same cold-start-inflates-the-number issue as its own CPU "Test 1").
+- `load_gulfdrifters()`'s docstring promised a `time` field the function
+  never actually returned (the NetCDF has one; the reader just didn't
+  extract it) — now extracted and segmented the same way as
+  `lon`/`lat`/`u`/`v`, purely additive to the returned `NamedTuple`.
 
 ### Known gaps (carried forward, not blocking this release)
 
-- `load_gulfdrifters()`'s docstring promises a `time` field that the
-  function doesn't actually return (the underlying NetCDF has one; the
-  reader just doesn't extract it). `scripts/validate_gulfdrifters.jl`
-  works around this by assuming the documented hourly sampling rather than
-  reading `time` a second time.
+- **GulfDrifters baseline is not settled** — see the three non-comparable
+  numbers under Added, above. Revisit once GOMED access is granted, or a
+  full (non-subsampled) significance-test census is run.
+- `envs/cpu/Project.toml` and `envs/gpu/Project.toml` don't list
+  `Multitaper` as a direct dependency (only the published package's
+  weakdep mechanism provides it), which meant every ad hoc validation
+  script this release needed a throwaway scratch environment instead of
+  using the tracked dev envs directly. Undecided whether to add it there
+  (this is a different tradeoff than the published-package GPL
+  consideration that justified the weakdep in the first place, since these
+  are internal dev/test environments, not the public package).
+- `RAFOSLoader`'s `bbox`/`date_range`/`pressure_range` filters and
+  `rafos_velocity_estimates()` are silent no-ops due to a `:col in
+  names(df)` vs. `hasproperty(df, :col)` bug (DataFrames.jl returns
+  `Vector{String}` from `names()`, so the `Symbol in` check is always
+  `false`). Found 2026-07-03/04, reported, not yet fixed pending
+  confirmation this is production code safe to change.
 - No CPU/GPU performance regression baseline exists yet to compare against
-  — `test_cpu_perf.jl` records today's CPU throughput as a first data
-  point; GPU numbers require an Ixachi run (see release notes).
-- `spectral_multitaper_batch_gpu` was reported as having an unresolved
-  issue as of the Phase 2 work; not independently re-verified here.
+  in future releases — `test_cpu_perf.jl` records this release's CPU
+  throughput as a first data point; the 46.2× GPU number above is this
+  release's first GPU data point too.
