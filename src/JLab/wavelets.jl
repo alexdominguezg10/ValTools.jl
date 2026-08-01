@@ -1008,8 +1008,8 @@ end
 # ============================================================================
 
 """
-    rotary_ridge_properties(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0,
-                            f_coriolis=1.0, min_cycles=2*sqrt(6)/pi, alpha=0.25)
+    rotary_ridge_properties(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=2.0,
+                            f_coriolis=1.0, min_cycles=2*sqrt(beta*gamma)/pi, alpha=0.25)
 
 Extract **one-sided** wavelet ridges from a bivariate velocity series and
 summarize each one by its ellipse properties, following Lilly &
@@ -1047,7 +1047,11 @@ the high-amplitude portion of a ridge dominates its summary values.
   Defaults to `1.0`, which leaves `omega_ast_bar` as a plain radian
   frequency — pass a real value to get the paper's nondimensional quantity.
 - `min_cycles`: minimum ridge length in cycles (their Eq. 61 threshold,
-  `2√6/π ≈ 1.6` for the default `β=8, γ=3` wavelet)
+  `2P/π` where `P=√(βγ)` is the wavelet duration — defaults to
+  `2√6/π ≈ 1.6` for the default `(β,γ)=(2,3)` wavelet, and tracks whatever
+  `beta`/`gamma` are actually passed rather than staying fixed at that
+  number; an earlier version hardcoded `2√6/π` regardless of `beta`, which
+  was silently wrong for any non-default `beta`)
 - `alpha`: frequency-continuity tolerance passed to [`ridgechains`](@ref)
 
 # Returns
@@ -1055,18 +1059,34 @@ the high-amplitude portion of a ridge dominates its summary values.
 `npoints`, `L`, `xi_bar`, `omega_ast_bar`, `kappa_bar`, `sense`
 (`:ccw`/`:cw`, from the sign of `xi_bar`).
 
+# Wavelet duration default
+`beta=2.0` (with `gamma=3.0`, giving `P=√6≈2.449`) deliberately does NOT
+match this file's other functions' shared `beta=8.0` default (`wavetrans`,
+`rotary_wavetrans`, `wavelet_significance`, etc. — left untouched here,
+scoped change). `(β,γ)=(2,3)` is the actual value used throughout Lilly,
+Scott & Olhede (2011) and Lilly & Perez-Brunius (2021) for this exact
+eddy-ridge application — confirmed by testing against 28 real GOMED
+ridges: `beta=2` measurably tightens ridge-extent agreement over
+`beta=8` (mean temporal Jaccard overlap 0.541->0.577, "similar extent"
+cases 6/28->10/28) versus GOMED's own ridges, though it does not fully
+resolve the remaining scatter on its own (see
+project_gomed_validation_results memory).
+
 # References
 Lilly & Perez-Brunius (2021), Nonlin. Processes Geophys. 28, 181-212.
 Lilly & Olhede (2010b) for the ellipse/rotary parameter relations.
+Lilly, Scott & Olhede (2011), Geophys. Res. Lett. 38, L23605, for the
+beta=2 gamma=3 wavelet choice (their Sect. 3: "P_psi/pi = sqrt(6)/pi ~=
+0.78 in order to obtain a high degree of time concentration").
 """
 function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
                                  dt::Real=1.0,
                                  fs::Union{AbstractVector, Nothing}=nothing,
                                  nv::Int=8,
                                  gamma::Real=3.0,
-                                 beta::Real=8.0,
+                                 beta::Real=2.0,
                                  f_coriolis::Real=1.0,
-                                 min_cycles::Real=2*sqrt(6)/π,
+                                 min_cycles::Real=2*sqrt(beta*gamma)/π,
                                  alpha::Real=0.25)
 
     length(u) == length(v) || error("u and v must have the same length")
