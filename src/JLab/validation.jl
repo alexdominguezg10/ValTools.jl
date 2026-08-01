@@ -54,6 +54,52 @@ function inertial_frequency(lat::Real)
 end
 
 """
+    local_tangent_plane(lat, lon; R=6371.0)
+
+Fixed local tangent-plane projection of a `(lat, lon)` trajectory to
+Cartesian displacement `(x, y)` in km, referenced to the trajectory's own
+mean position: `x` eastward, `y` northward.
+
+`x = R·cos(lat₀)·(lon - lon₀)`, `y = R·(lat - lat₀)`, with `(lat₀, lon₀)`
+the mean of the input and `R` Earth's radius in km.
+
+# Why this exists
+jLab's real `eddyridges.m` (the code that generated GOMED) wavelet-transforms
+POSITION, not velocity -- confirmed by reading `jWavelet/spheretrans.m`
+directly (`[wx,wy,wz]=wavetrans(x,y,z,...)` on the 3D Cartesian projection
+of lat/lon; even jLab's own source has Lilly's leftover comment "I think
+that the real answer is that I should decompose velocity, not
+displacement", i.e. this was a known, never-resolved open question, and
+velocity is NOT what the actual GOMED-generating code does). Passing this
+function's output as the `u`,`v` arguments to
+[`rotary_ridge_properties`](@ref) (or to `wavetrans`-based ridge-tracking
+functions) instead of raw velocity is therefore what a GOMED-faithful call
+needs.
+
+This is a deliberately simple FIRST-ORDER approximation, NOT jLab's actual
+`spheretrans_xyz2xy` (which uses a full 3D-sphere wavelet transform,
+re-projected onto a TIME-VARYING tangent plane centered on the
+oscillation's own instantaneous center within each wavelet band, rather
+than one fixed reference point for the whole record). Even so, it closes
+most of the gap: on the 28-case `scripts/jlab_crosscheck_compare.jl`
+harness (2026-08-01, "ValTools 7"), swapping from velocity to this
+projection took mean Jaccard vs. real jLab output from 0.575 (0/28 clean
+1:1 matches) to 0.957 (13/28 clean). Refining toward jLab's real
+time-varying reprojection is a known open follow-up, not yet attempted.
+
+# References
+Lilly, jLab, `jWavelet/spheretrans.m`,
+https://github.com/jonathanlilly/jLab.
+"""
+function local_tangent_plane(lat::AbstractVector{<:Real}, lon::AbstractVector{<:Real}; R::Real=6371.0)
+    length(lat) == length(lon) || error("lat and lon must have the same length")
+    lat0, lon0 = mean(lat), mean(lon)
+    x = R .* cosd(lat0) .* deg2rad.(lon .- lon0)
+    y = R .* deg2rad.(lat .- lat0)
+    return x, y
+end
+
+"""
     get_freq_band(name::String; lat::Real=25.0, width::Real=0.2)
 
 Get frequency band limits in cycles/hour.

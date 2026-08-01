@@ -70,6 +70,17 @@
 # eddy_census (its wt_v is computed but never actually used for anything),
 # but would silently misalign wx/wy if anyone later relies on it -- use
 # fs= here specifically to get the true matching grid.
+#
+# POSITION, NOT VELOCITY (fixed 2026-08-01, "ValTools 7", after finding the
+# real cause of a long-standing ridge-fragmentation gap against GOMED):
+# jLab's actual eddyridges.m/spheretrans.m wavelet-transforms POSITION, not
+# velocity -- eddy_census_significant itself is signal-agnostic (the u/v
+# argument names are legacy), but this script's own main loop below now
+# passes `local_tangent_plane(data.lat[i], data.lon[i])` (a simple local
+# tangent-plane displacement projection, src/JLab/validation.jl) instead of
+# `data.u[i], data.v[i]`. See project_gomed_validation_results memory for
+# the empirical confirmation (mean Jaccard vs. real jLab output 0.575->0.957
+# on the case-study harness after this exact swap).
 
 using ValTools, ValTools.JLab
 using Multitaper
@@ -163,7 +174,8 @@ n = data.n_drifters
 println("n_drifters = $n")
 
 valid_idx = [i for i in 1:n if length(data.u[i]) >= MIN_SAMPLES &&
-                                all(isfinite, data.u[i]) && all(isfinite, data.v[i])]
+                                all(isfinite, data.u[i]) && all(isfinite, data.v[i]) &&
+                                all(isfinite, data.lat[i]) && all(isfinite, data.lon[i])]
 println("valid_idx = $(length(valid_idx)) / $n (full census, no subsample)")
 println("Threads.nthreads() = $(Threads.nthreads())")
 
@@ -179,7 +191,8 @@ Threads.@threads for i in valid_idx
     f0_rad_per_hour = 2π * inertial_frequency(mean_lat)   # rad/hour, see UNITS NOTE above
     rng = MersenneTwister(1_000_000 + i)                  # distinct, reproducible per drifter
 
-    events = eddy_census_significant(data.u[i], data.v[i], DT_HOURS; rng=rng)
+    x_km, y_km = local_tangent_plane(data.lat[i], data.lon[i])
+    events = eddy_census_significant(x_km, y_km, DT_HOURS; rng=rng)
 
     rows = NamedTuple[]
     for e in events

@@ -129,7 +129,7 @@ export wavetrans, wavetrans_batch, tiredecode, transmax,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,
        validate_spectra, validate_rotary, validate_model_spectra,
        kinetic_energy_budget, eddy_census,
-       inertial_frequency, get_freq_band,
+       inertial_frequency, local_tangent_plane, get_freq_band,
        FREQ_BANDS_HOURS,
        JDATA_CATALOG, jdata_list, jdata_download,
        load_gulfdrifters, load_gulfflow, load_gomed

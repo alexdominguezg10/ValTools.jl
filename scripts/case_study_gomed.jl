@@ -18,6 +18,19 @@
 # canonical source, including the Eq.62 rotary-sense fix) rather than
 # shared via an include -- keeps this diagnostic script standalone. If the
 # detection/sense logic is changed again there, mirror it here too.
+#
+# POSITION, NOT VELOCITY (fixed 2026-08-01, "ValTools 7"): both the :rhox
+# (rotary_ridge_properties) and :ar1 (eddy_census_significant) pipelines
+# below now analyze `local_tangent_plane(lat, lon)` -- a local
+# tangent-plane displacement projection (src/JLab/validation.jl) -- not
+# raw GulfDriftersOpen velocity `data.u`/`data.v`. This matches jLab's real
+# eddyridges.m/spheretrans.m, which wavelet-transforms position, never
+# velocity; see local_tangent_plane's docstring and
+# project_gomed_validation_results memory for the full story (mean Jaccard
+# vs. real jLab output on this exact 28-case harness: 0.575 -> 0.957).
+# `rotary_ridge_properties` also now gets `fmax_ratio=2, fmin_ratio=1/64`
+# (jLab's real Gulf-census frequency band, "ValTools 6") -- previously
+# unset here, using the generic full-spectrum grid instead.
 
 using ValTools, ValTools.JLab
 using ValTools.Metrics: rotary_noise_surrogate
@@ -174,15 +187,21 @@ function _rhox_pass(selected, data, id_to_idx, segment_id)
     per_case = Dict{Int,Vector{NamedTuple}}()
     for k in selected
         i = id_to_idx[segment_id[k]]
-        u, v, lat = data.u[i], data.v[i], data.lat[i]
+        lat, lon = data.lat[i], data.lon[i]
+        # POSITION, not velocity (fixed 2026-08-01, "ValTools 7"): jLab's
+        # real eddyridges.m/spheretrans.m wavelet-transforms displacement,
+        # not velocity -- see local_tangent_plane's docstring and
+        # project_gomed_validation_results memory for the full story and
+        # the empirical confirmation (mean Jaccard vs. real jLab 0.575->0.957).
+        x_km, y_km = local_tangent_plane(lat, lon)
         f0 = 2π * inertial_frequency(mean(lat))
-        rr = rotary_ridge_properties(u, v; f_coriolis=f0)
+        rr = rotary_ridge_properties(x_km, y_km; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64)
         per_case[k] = rr
-        append!(data_pool, rr); n_data_pts += length(u)
+        append!(data_pool, rr); n_data_pts += length(x_km)
         for s in 1:N_NOISE_PER_DRIFTER
-            ex, ey = rotary_noise_surrogate(u, v; dt_hours=DT_HOURS, nw=4.0,
+            ex, ey = rotary_noise_surrogate(x_km, y_km; dt_hours=DT_HOURS, nw=4.0,
                                             rng=MersenneTwister(7_000_000 + 100k + s))
-            append!(noise_pool, rotary_ridge_properties(ex, ey; f_coriolis=f0))
+            append!(noise_pool, rotary_ridge_properties(ex, ey; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64))
             n_noise_pts += length(ex)
         end
     end
@@ -210,7 +229,7 @@ results = NamedTuple[]
 for k in selected
     sid = segment_id[k]
     i = id_to_idx[sid]
-    u, v, t, lat = data.u[i], data.v[i], data.time[i], data.lat[i]
+    t, lat, lon = data.time[i], data.lat[i], data.lon[i]
 
     gomed_rows = findall(==(ridge_id_arr[k]), ids_obs)
     gt = time_obs[gomed_rows]
@@ -227,7 +246,8 @@ for k in selected
     else
         rng = MersenneTwister(2_000_000 + k)
         f0 = 2π * inertial_frequency(mean(lat))
-        evs = eddy_census_significant(u, v, DT_HOURS; rng=rng)
+        x_km, y_km = local_tangent_plane(lat, lon)  # position, not velocity -- see local_tangent_plane docstring
+        evs = eddy_census_significant(x_km, y_km, DT_HOURS; rng=rng)
         for e in evs
             L_e = e["mean_frequency"] * (e["duration"] * DT_HOURS) / (2π)
             ss = e["sense"] == :ccw ? 1.0 : -1.0
