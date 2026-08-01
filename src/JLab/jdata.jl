@@ -163,7 +163,11 @@ NamedTuple with:
 - `u::Vector{Vector{Float64}}`: Eastward velocity (m/s)
 - `v::Vector{Vector{Float64}}`: Northward velocity (m/s)
 - `time::Vector{Vector{Float64}}`: Time (days since reference)
-- `id::Vector{Int}`: Drifter IDs
+- `id::Vector{Int}`: Trajectory segment IDs (`cf_role="trajectory_id"` in the
+  NetCDF; one physical drifter may contribute more than one segment/id)
+- `drifter_id::Vector{Int}`: Underlying drifter IDs from the source
+  GulfDriftersAll dataset — shared ID space with the published GOMED eddy
+  census (Lilly & Perez-Brunius, 2021b), so can be joined against it
 - `n_drifters::Int`: Number of drifters
 
 # References
@@ -240,9 +244,10 @@ function _read_gulfdrifters(ds)
     end
 
     ids = "id" in var_names ? Int.(ds["id"][:]) : collect(1:n_drifters)
+    drifter_ids = "drifter_id" in var_names ? Int.(ds["drifter_id"][:]) : ids
 
     return (lon=lon, lat=lat, u=u, v=v, time=time,
-            id=ids, n_drifters=n_drifters,
+            id=ids, drifter_id=drifter_ids, n_drifters=n_drifters,
             source="GulfDriftersOpen.nc",
             citation=JDATA_CATALOG["gulfdrifters"].citation)
 end

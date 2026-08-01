@@ -55,5 +55,13 @@ using ValTools.JLab
             @test length(result.time) == length(result.lon)
             @test all(length(result.time[i]) == length(result.lon[i]) for i in 1:result.n_drifters)
         end
+
+        @testset "load_gulfdrifters includes drifter_id field" begin
+            result = load_gulfdrifters(; download=false)
+            @test haskey(result, :drifter_id)
+            @test result.drifter_id isa Vector{Int}
+            @test !isempty(result.drifter_id)
+            @test length(result.drifter_id) == result.n_drifters
+        end
     end
 end

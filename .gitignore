@@ -1,0 +1,3 @@
+*.nc
+envs/*/Manifest.toml
+results/
