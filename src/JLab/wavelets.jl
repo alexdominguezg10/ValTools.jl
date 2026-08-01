@@ -294,7 +294,8 @@ function wavetrans(x::AbstractVector;
                    mother::String="morse",
                    gamma::Real=3.0,
                    beta::Real=8.0,
-                   gpu::Bool=false)
+                   gpu::Bool=false,
+                   boundary::Symbol=:zeros)
 
     xv = collect(Float64, x)
     N  = length(xv)
@@ -305,9 +306,6 @@ function wavetrans(x::AbstractVector;
 
     # Linear detrend (jLab default)
     xv = _detrend_signal(xv)
-
-    # Pad to next power of 2
-    N_fft = 2^ceil(Int, log2(2*N - 1))
 
     # Generate analysis frequencies
     if fs === nothing && scales === nothing
@@ -320,17 +318,16 @@ function wavetrans(x::AbstractVector;
     end
     fs = collect(Float64, fs)
 
+    x_pad, N_fft, offset = _boundary_pad(xv, N, boundary)
+
     # Build filter bank (calibrated Morse wavelet)
     bank = _build_filter_bank(N_fft, fs, g, b)
-
-    # Pad signal
-    x_pad = vcat(xv, zeros(N_fft - N))
 
     # Dispatch
     if gpu
         wt = _wavetrans_gpu(x_pad, bank, N, N_fft, length(fs))
     else
-        wt = _wavetrans_cpu(x_pad, bank, N, N_fft, length(fs))
+        wt = _wavetrans_cpu(x_pad, bank, N, N_fft, length(fs); offset=offset)
     end
 
     # Factor of 2 for real-valued input (jLab convention)
@@ -339,6 +336,31 @@ function wavetrans(x::AbstractVector;
     end
 
     return wt, fs
+end
+
+# Boundary-condition padding before the wavelet FFT (timeseries_boundary.m).
+# `:zeros` (this file's long-standing default): zero-pad to the next power
+# of 2 beyond 2N-1, extract the FIRST N samples of the ifft -- functionally
+# jLab's 'zeros' option, though sized for FFT efficiency rather than
+# exactly N. `:mirror`: reflect the series about both endpoints
+# (`[flipud(x);x;flipud(x)]`, exactly 3N, no further padding -- matches
+# jLab's `timeseries_boundary.m:98-99` exactly), extract the MIDDLE N
+# samples (`index=N+1:2N`, `wavetrans_continue`, jLab's own extraction
+# after the mirror pad). `eddyridges_loop` (jOceans/eddyridges.m:562-564)
+# explicitly requests 'mirror', not jLab's own wavetrans default of
+# 'periodic' -- so :mirror is the one to use for eddy-ridge-faithful
+# analysis; :zeros stays the default here for backward compatibility with
+# every other caller in this file.
+function _boundary_pad(xv::Vector{Float64}, N::Int, boundary::Symbol)
+    if boundary === :zeros
+        N_fft = 2^ceil(Int, log2(2*N - 1))
+        return vcat(xv, zeros(N_fft - N)), N_fft, 0
+    elseif boundary === :mirror
+        x_pad = vcat(reverse(xv), xv, reverse(xv))
+        return x_pad, 3N, N
+    else
+        error("boundary must be :zeros or :mirror, got $boundary")
+    end
 end
 
 function _detrend_signal(x::Vector{Float64})
@@ -353,13 +375,13 @@ end
 # ── CPU path ────────────────────────────────────────────────────────────────
 
 function _wavetrans_cpu(x_pad::Vector{<:Number}, bank::Matrix{Float64},
-                        N::Int, N_fft::Int, n_scales::Int)
+                        N::Int, N_fft::Int, n_scales::Int; offset::Int=0)
     X  = fft(x_pad)
     wt = zeros(ComplexF64, N, n_scales)
 
     for j in 1:n_scales
         Y = X .* conj.(@view(bank[:, j]))      # conj(ψ̂) · X̂ (jLab convention)
-        wt[:, j] .= ifft(Y)[1:N]
+        wt[:, j] .= ifft(Y)[offset+1:offset+N]
     end
     return wt
 end
@@ -412,7 +434,8 @@ function rotary_wavetrans(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
                           fs::Union{AbstractVector, Nothing}=nothing,
                           nv::Int=8,
                           gamma::Real=3.0,
-                          beta::Real=8.0)
+                          beta::Real=8.0,
+                          boundary::Symbol=:zeros)
     length(u) == length(v) || error("u and v must have the same length")
     N = length(u)
     (N < 1) && error("Input must have at least 1 sample")
@@ -421,8 +444,6 @@ function rotary_wavetrans(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
     uf = _detrend_signal(collect(Float64, u))
     vf = _detrend_signal(collect(Float64, v))
 
-    N_fft = 2^ceil(Int, log2(2 * N - 1))
-
     if fs === nothing
         P, _, _ = morseprops(g, b)
         density = max(1, round(Int, nv * P / 4))
@@ -430,17 +451,30 @@ function rotary_wavetrans(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
     end
     fs = collect(Float64, fs)
 
-    bank = _build_filter_bank(N_fft, fs, g, b)
-
     w = uf .+ im .* vf
     wc = conj.(w)
-    w_pad = vcat(w, zeros(ComplexF64, N_fft - N))
-    wc_pad = vcat(wc, zeros(ComplexF64, N_fft - N))
+    w_pad, N_fft, offset = _boundary_pad_complex(w, N, boundary)
+    wc_pad, _, _ = _boundary_pad_complex(wc, N, boundary)
 
-    wt_ccw = _wavetrans_cpu(w_pad, bank, N, N_fft, length(fs))
-    wt_cw = _wavetrans_cpu(wc_pad, bank, N, N_fft, length(fs))
+    bank = _build_filter_bank(N_fft, fs, g, b)
+
+    wt_ccw = _wavetrans_cpu(w_pad, bank, N, N_fft, length(fs); offset=offset)
+    wt_cw = _wavetrans_cpu(wc_pad, bank, N, N_fft, length(fs); offset=offset)
 
     return wt_ccw, wt_cw, fs
+end
+
+# Complex-valued counterpart of _boundary_pad (see its docstring) -- same
+# :zeros/:mirror semantics, for the u+iv / u-iv rotary inputs.
+function _boundary_pad_complex(w::Vector{ComplexF64}, N::Int, boundary::Symbol)
+    if boundary === :zeros
+        N_fft = 2^ceil(Int, log2(2 * N - 1))
+        return vcat(w, zeros(ComplexF64, N_fft - N)), N_fft, 0
+    elseif boundary === :mirror
+        return vcat(reverse(w), w, reverse(w)), 3N, N
+    else
+        error("boundary must be :zeros or :mirror, got $boundary")
+    end
 end
 
 """
@@ -1009,7 +1043,9 @@ end
 
 """
     rotary_ridge_properties(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=2.0,
-                            f_coriolis=1.0, min_cycles=2*sqrt(beta*gamma)/pi, alpha=0.25)
+                            f_coriolis=1.0, min_cycles=2*sqrt(beta*gamma)/pi, alpha=0.25,
+                            abs_floor=0.0, fmax_ratio=nothing, fmin_ratio=nothing,
+                            D=nothing, eta=0.05)
 
 Extract **one-sided** wavelet ridges from a bivariate velocity series and
 summarize each one by its ellipse properties, following Lilly &
@@ -1053,6 +1089,52 @@ the high-amplitude portion of a ridge dominates its summary values.
   number; an earlier version hardcoded `2√6/π` regardless of `beta`, which
   was silently wrong for any non-default `beta`)
 - `alpha`: frequency-continuity tolerance passed to [`ridgechains`](@ref)
+- `abs_floor`: absolute-frequency floor passed to
+  [`ridgechains_jlab`](@ref)'s relative-error denominator (radians per
+  sample, same units as `f_coriolis`). Defaults to `0.0` (jLab's own
+  unfloored relative criterion); nonzero values counter fragmentation of
+  slow eddies -- see [`ridgechains_jlab`](@ref) for why.
+- `fmax_ratio`, `fmin_ratio`: when BOTH given (and `fs` is left `nothing`),
+  restrict the analysis frequencies to jLab's own eddy band from
+  `eddyridges.m`: `[fmin_ratio, fmax_ratio] * f_coriolis`, rather than the
+  generic full-spectrum grid `rotary_wavetrans` otherwise builds. This is
+  NOT the default because `f_coriolis` itself defaults to the `1.0`
+  placeholder (see above) -- applying a Coriolis-relative band to that
+  placeholder would silently mis-restrict any caller not doing real
+  physical-unit analysis. Pass real values together with a real
+  `f_coriolis` to opt in. Matches `eddyridges_loop`'s own construction
+  (`jOceans/eddyridges.m:552-555`):
+  `f_high = min(fmax_ratio*f_coriolis, morsehigh(gamma,beta,eta))`,
+  `f_low = max(fmin_ratio*f_coriolis, π*P/N)` where `P=√(βγ)` -- the
+  second term is a record-length floor that only binds for pathologically
+  short records; for typical GulfDrifters segments `fmin_ratio*f_coriolis`
+  dominates. jLab's actual Gulf-census call
+  (`jFigures/makefigs_gulfcensus.m:460`,
+  `onegulfeddy=eddyridges(...,2,1/64,sqrt(6),1,0)`) uses `fmax_ratio=2`,
+  `fmin_ratio=1/64` -- pass those explicitly to match GOMED.
+- `D`: density override for the eddy-band grid (only used when
+  `fmax_ratio`/`fmin_ratio` are both given). Defaults to `16`, matching
+  `eddyridges.m`'s own hardcoded `D=16` -- deliberately NOT the generic
+  `morsespace`/`rotary_wavetrans` default of `4`ish (finer frequency
+  resolution is what makes the eddy band usable at all for short records).
+- `eta`: Nyquist-decay threshold for the eddy-band high-frequency cutoff
+  (only used when `fmax_ratio`/`fmin_ratio` are both given). Defaults to
+  `0.05`, matching `eddyridges.m`'s hardcoded `alpha=0.05` -- NOT
+  `morsespace`'s generic default of `0.1`.
+
+# Frequency-grid gap this fixes
+Before this, `rotary_ridge_properties` always used `rotary_wavetrans`'s
+generic full-spectrum grid (an N-independent-of-physics "5 wavelets must
+pack into the record" heuristic, `f_low = 2√2·P·5/N`), never
+`eddyridges.m`'s actual Coriolis-relative eddy band. For short drifter
+segments (~80 days) this generic cutoff sits at a HIGHER frequency (~13.5d
+period) than jLab's real `FMIN=1/64`-of-Coriolis band would allow (~38d
+period) -- so slow, large eddies (16+ day periods) fell right at or past
+the grid's structurally-excluded edge scale and fragmented into many
+short, wrong-frequency ridge pieces, independent of any ridge-chaining
+tolerance. Confirmed via direct comparison against jLab's own
+`eddyridges.m`/`morsespace.m` source (2026-08-01) -- see
+project_gomed_validation_results memory for the case-by-case numbers.
 
 # Returns
 `Vector{NamedTuple}`, one per surviving ridge, with fields `start`, `stop`,
@@ -1087,26 +1169,61 @@ function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:
                                  beta::Real=2.0,
                                  f_coriolis::Real=1.0,
                                  min_cycles::Real=2*sqrt(beta*gamma)/π,
-                                 alpha::Real=0.25)
+                                 alpha::Real=0.25,
+                                 abs_floor::Real=0.0,
+                                 fmax_ratio::Union{Real,Nothing}=nothing,
+                                 fmin_ratio::Union{Real,Nothing}=nothing,
+                                 D::Union{Int,Nothing}=nothing,
+                                 eta::Real=0.05,
+                                 boundary::Symbol=:zeros)
 
     length(u) == length(v) || error("u and v must have the same length")
     abs(f_coriolis) > 0 || error("f_coriolis must be nonzero")
 
-    wt_ccw, wt_cw, fs_out = rotary_wavetrans(u, v; dt=dt, fs=fs, nv=nv,
-                                             gamma=gamma, beta=beta)
+    # jLab-faithful eddy-band grid (eddyridges.m:552-555), opt-in -- see
+    # docstring "Frequency-grid gap this fixes". Only kicks in when the
+    # caller hasn't already supplied an explicit fs.
+    fs_use = fs
+    if fs_use === nothing && fmax_ratio !== nothing && fmin_ratio !== nothing
+        P, _, _ = morseprops(Float64(gamma), Float64(beta))
+        N = length(u)
+        f_high = min(Float64(fmax_ratio) * f_coriolis, _morsehigh(gamma, beta, eta))
+        f_low = max(Float64(fmin_ratio) * f_coriolis, π * P / N)
+        dens = D === nothing ? 16 : D
+        fs_use = morsespace(gamma, beta, N; f_high=f_high, f_low=f_low, density=dens)
+    end
+
+    wt_ccw, wt_cw, fs_out = rotary_wavetrans(u, v; dt=dt, fs=fs_use, nv=nv,
+                                             gamma=gamma, beta=beta, boundary=boundary)
 
     a_plus = abs.(wt_ccw)
     a_minus = abs.(wt_cw)
     kappa2 = a_plus .^ 2 .+ a_minus .^ 2
-    delta = a_plus .- a_minus          # >0 where CCW dominates
-    mag = sqrt.(kappa2)                # ||w(t,s)||, the total transform magnitude
+    delta = a_plus .- a_minus          # >0 where CCW (wp) dominates, matches jLab's abs(wp)>abs(wn)
+    mag = sqrt.(kappa2)                # joint amplitude kappa=||w(t,s)||, jLab's `rq`/`a` (isridgepoint.m:56,62)
+
+    # jLab-faithful joint instantaneous frequency (instmom(w,1,3) on the
+    # Cartesian (wx,wy) pair, ridgewalk.m:349 -> isridgepoint.m:56) --
+    # shared by both sides below, since it does not depend on the mask.
+    om_joint, dfdt_joint = _instfreq_joint(wt_ccw, wt_cw, 1.0)
+    mag_c = complex.(mag)  # ridgechains_jlab only ever reads abs.(w); embedding as complex satisfies its type
 
     ridges = NamedTuple[]
 
     for side in (:ccw, :cw)
-        # Mask the opposite-rotation half-plane, then chain ridges on what
-        # remains. Zeroed entries can never be ridge points (ridgechains
-        # requires amplitude strictly above its threshold, default 0).
+        # Ridge points are local maxima of the UNMASKED joint amplitude
+        # `mag`, exactly like jLab: isridgepoint.m finds local maxima on the
+        # full joint quantity first, and only THEN applies the one-sided
+        # mask as a post-hoc point filter (`bool=bool.*mask`, isridgepoint.m:127)
+        # -- masked-out points are simply ineligible ridge-point candidates,
+        # not zeroed out of the amplitude field used to locate maxima. An
+        # earlier version zeroed wt_ccw/wt_cw before finding local maxima,
+        # which distorts exactly where those maxima sit near every mask
+        # boundary and was a real, jLab-crosscheck-confirmed source of
+        # ridge fragmentation (see project_gomed_validation_results memory,
+        # 2026-08-01) -- fixed by passing `mask` through to
+        # ridgechains_jlab instead.
+        #
         # Note the exactly-zero case (|w⁺| == |w⁻|, i.e. perfectly linear
         # polarization) is excluded from BOTH sides and so yields no ridge at
         # all. That is deliberate: a purely rectilinear oscillation is not an
@@ -1114,28 +1231,39 @@ function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:
         # `density_ratio_significance` and be rejected. Assigning it to one
         # side instead would double-count it. In real (noisy) data `delta` is
         # never identically zero, so this only bites on synthetic input.
-        masked = copy(mag)
-        if side === :ccw
-            masked[delta .<= 0] .= 0.0
-        else
-            masked[delta .>= 0] .= 0.0
-        end
+        mask_side = side === :ccw ? (delta .> 0) : (delta .< 0)
 
-        events = ridgechains(complex.(masked), fs_out; alpha=alpha, min_length=1.0)
+        events = ridgechains_jlab(mag_c, fs_out; alpha=alpha, min_cycles=min_cycles, dt=1.0,
+                                  abs_floor=abs_floor, om=om_joint, dfdt=dfdt_joint, mask=mask_side)
 
         for e in events
-            times = e.start:e.stop
-            js = e.scale_idx
-            length(js) == length(times) || continue   # defensive: chains are contiguous
+            times = collect(e.times)
+            n = length(times)
 
-            k2 = [kappa2[t, j] for (t, j) in zip(times, js)]
-            ap = [a_plus[t, j] for (t, j) in zip(times, js)]
-            am = [a_minus[t, j] for (t, j) in zip(times, js)]
+            # Interpolate a_plus^2/a_minus^2 to the same sub-bin scale
+            # location (jfrac) the frequency was refined to, via the same
+            # quadinterp fit ridgechains_jlab used for amplitude/frequency
+            # (ridgeinterp.m's "interpolate any other ridge quantity the
+            # same way" -- here applied to kappa/xi rather than the raw
+            # transform, since that's what downstream needs).
+            ap2 = Vector{Float64}(undef, n)
+            am2 = Vector{Float64}(undef, n)
+            for k in 1:n
+                t, j, je = times[k], e.jcenter[k], e.jfrac[k]
+                if je == j
+                    ap2[k] = a_plus[t, j]^2
+                    am2[k] = a_minus[t, j]^2
+                else
+                    ap2[k] = quadinterp(j - 1, j, j + 1, a_plus[t, j-1]^2, a_plus[t, j]^2, a_plus[t, j+1]^2, je)
+                    am2[k] = quadinterp(j - 1, j, j + 1, a_minus[t, j-1]^2, a_minus[t, j]^2, a_minus[t, j+1]^2, je)
+                end
+            end
+            k2 = ap2 .+ am2
             sk2 = sum(k2)
             sk2 > 0 || continue
 
-            xi = (ap .^ 2 .- am .^ 2) ./ k2
-            omega = e.freq                              # rad/sample
+            xi = (ap2 .- am2) ./ k2
+            omega = e.freq                              # rad/sample, jLab-style phase-derived
             omega_ast = sign.(xi) .* omega ./ f_coriolis
 
             # Eq. 60: ridge length in cycles (one sample per time step).
@@ -1145,9 +1273,9 @@ function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:
             # Eq. 74: kappa^2-weighted ridge averages.
             xi_bar = sum(k2 .* xi) / sk2
             omega_ast_bar = sum(k2 .* omega_ast) / sk2
-            kappa_bar = sqrt(sk2 / length(k2))
+            kappa_bar = sqrt(sk2 / n)
 
-            push!(ridges, (start=e.start, stop=e.stop, npoints=length(times),
+            push!(ridges, (start=times[1], stop=times[end], npoints=n,
                            L=L, xi_bar=xi_bar, omega_ast_bar=omega_ast_bar,
                            kappa_bar=kappa_bar,
                            sense=(xi_bar >= 0 ? :ccw : :cw)))
@@ -1285,4 +1413,322 @@ function density_ratio_significance(data_ridges, noise_ridges,
         rho[i] = sd > 0 ? Sn[b, bin] / sd : Inf
     end
     return rho
+end
+
+# ============================================================================
+# JLAB-FAITHFUL RIDGE CHAINING
+# (ported from jLab v1.7.1 jRidges/{quadinterp,instmom,ridgechains}.m,
+#  the exact version that generated GOMED -- confirmed algorithmically
+#  unchanged through jLab's current v1.7.3, 2026-08-01)
+# ============================================================================
+
+"""
+    quadinterp(t1, t2, t3, x1, x2, x3, t=nothing)
+
+Closed-form quadratic (parabola) interpolation/extrapolation through three
+exact points `(t1,x1), (t2,x2), (t3,x3)`.
+
+Solves `x = a*t^2 + b*t + c` for `(a,b,c)` via the exact Lagrange-style
+algebraic solution (no linear system, no loops — vectorizes elementwise
+over arrays), then either evaluates the fitted parabola at `t` or, if `t`
+is omitted, locates its vertex `t = -b/2a`.
+
+# Returns
+- `t !== nothing`: `x` — the fitted parabola evaluated at `t`
+- `t === nothing`: `(xe, te)` — the vertex value and its location
+
+# References
+Ported from jLab's `quadinterp.m` (Lilly, jLab v1.7.1/v1.7.3, identical).
+"""
+function quadinterp(t1, t2, t3, x1, x2, x3, t=nothing)
+    denom = @. (t1 - t2) * (t1 - t3) * (t2 - t3)
+    a = @. (x1 * (t2 - t3) + x2 * (t3 - t1) + x3 * (t1 - t2)) / denom
+    b = @. -(x1 * (t2^2 - t3^2) + x2 * (t3^2 - t1^2) + x3 * (t1^2 - t2^2)) / denom
+    c = @. (x1 * t2 * t3 * (t2 - t3) + x2 * t3 * t1 * (t3 - t1) + x3 * t1 * t2 * (t1 - t2)) / denom
+
+    if t === nothing
+        te = @. -b / (2 * a)
+        xe = @. a * te^2 + b * te + c
+        return xe, te
+    else
+        return @. a * t^2 + b * t + c
+    end
+end
+
+# --- Stage B: instantaneous frequency via unwrapped-phase differencing ----
+
+function _unwrap(p::AbstractVector{<:Real})
+    n = length(p)
+    out = similar(p, Float64)
+    n == 0 && return out
+    out[1] = p[1]
+    correction = 0.0
+    @inbounds for i in 2:n
+        d = p[i] - p[i-1]
+        if d > π
+            correction -= 2π
+        elseif d < -π
+            correction += 2π
+        end
+        out[i] = p[i] + correction
+    end
+    return out
+end
+
+# jLab's vdiff(...,'endpoint'): central difference in the interior,
+# one-sided forward/backward difference at the first/last sample.
+function _vdiff_endpoint(x::AbstractVector{<:Real}, dt::Real)
+    n = length(x)
+    d = similar(x, Float64)
+    n == 0 && return d
+    n == 1 && (d[1] = 0.0; return d)
+    d[1] = (x[2] - x[1]) / dt
+    d[n] = (x[n] - x[n-1]) / dt
+    @inbounds for i in 2:n-1
+        d[i] = (x[i+1] - x[i-1]) / (2dt)
+    end
+    return d
+end
+
+# Instantaneous frequency (Eq. from instmom.m:184) and its own time
+# derivative, evaluated on the FULL (t,s) transform matrix -- not just at
+# already-found ridge points -- one column (scale) at a time since phase
+# unwrapping only makes sense along the time axis at fixed scale.
+function _instfreq_matrix(w::AbstractMatrix{<:Complex}, dt::Real)
+    nt, ns = size(w)
+    om = Matrix{Float64}(undef, nt, ns)
+    for j in 1:ns
+        om[:, j] = _vdiff_endpoint(_unwrap(angle.(@view(w[:, j]))), dt)
+    end
+    dfdt = Matrix{Float64}(undef, nt, ns)
+    for j in 1:ns
+        dfdt[:, j] = _vdiff_endpoint(@view(om[:, j]), dt)
+    end
+    return om, dfdt
+end
+
+# --- Stage C: mutual-nearest-neighbor ridge chaining ----------------------
+
+struct _RidgePt
+    j::Int
+    om::Float64
+    dfdt::Float64
+end
+
+"""
+    ridgechains_jlab(w, fs; alpha=0.25, min_cycles=2*sqrt(6)/pi, dt=1.0, abs_floor=0.0,
+                     om=nothing, dfdt=nothing, mask=nothing)
+
+One-branch wavelet ridge chaining faithfully following jLab v1.7.1/v1.7.3's
+`ridgechains.m`/`isridgepoint.m`/`ridgeinterp.m`/`quadinterp.m` (the exact,
+algorithmically-unchanged version that produced GOMED) -- as opposed to
+[`ridgechains`](@ref)'s independent greedy-forward implementation.
+
+Differs from `ridgechains` in two ways, both ported directly rather than
+approximated:
+
+1. **Frequency estimate**: each ridge point's frequency comes from
+   [`_instfreq_matrix`](@ref) (finite-differenced unwrapped phase of `w`
+   itself, evaluated on the full matrix), not the nominal analysis-grid
+   value `fs[j]`. A second difference gives a LOCAL prediction
+   `fr_next=om+dfdt`, `fr_prev=om-dfdt` at every point, independent of any
+   chain's own history (`ridgechains.m:52-53`).
+2. **Matching**: two candidate points at consecutive time steps are linked
+   only if each is the OTHER's best match under the averaged forward/
+   backward relative frequency error (`ridgechains.m:73-105`) -- a mutual-
+   nearest-neighbor bipartite match, not a greedy forward search extending
+   whichever chain got there first. The relative error's denominator is
+   `max(|ω|, abs_floor)` rather than jLab's plain `|ω|`: for slow eddies
+   (`|ω|` near zero), the plain relative criterion makes ordinary
+   finite-difference frequency noise look like a huge fractional jump,
+   fragmenting one true ridge into many short spurious pieces. `abs_floor`
+   defaults to `0.0` (exactly jLab's own, unfloored criterion).
+
+Ridge points additionally get their scale index refined to sub-bin
+precision via [`quadinterp`](@ref) fit through the amplitude² at the three
+scales around each point (`ridgeinterp.m:76-92`), with frequency
+re-evaluated at that refined location.
+
+Excludes the first/last scale bins from ever being ridge points
+(`isridgepoint.m:99`, `bool(:,[1 end])=0`), unlike `ridgechains`.
+
+# Returns
+`Vector{NamedTuple}`, one per surviving ridge, with fields `times`
+(`UnitRange` into the time axis), `freq` (interpolated instantaneous
+frequency along the ridge, rad/sample), `jfrac` (fractional scale index
+along the ridge, for looking up other quantities via [`quadinterp`](@ref)).
+
+# References
+Ported from jLab v1.7.1 (confirmed algorithmically identical through
+v1.7.3, 2026-08-01) `jRidges/ridgechains.m`, `isridgepoint.m`,
+`ridgeinterp.m`, `quadinterp.m`. Lilly, jLab, https://github.com/jonathanlilly/jLab.
+"""
+function ridgechains_jlab(w::AbstractMatrix{<:Complex}, fs::AbstractVector;
+                          alpha::Real=0.25, min_cycles::Real=2*sqrt(6)/π,
+                          dt::Real=1.0, abs_floor::Real=0.0,
+                          om::Union{Nothing,AbstractMatrix}=nothing,
+                          dfdt::Union{Nothing,AbstractMatrix}=nothing,
+                          mask::Union{Nothing,AbstractMatrix{Bool}}=nothing)
+    nt, ns = size(w)
+    ns >= 3 || return NamedTuple[]
+    amp = abs.(w)
+    # Experimental override: jLab's own eddyridges.m actually derives the
+    # instantaneous frequency from a joint POWER-WEIGHTED AVERAGE of the raw
+    # Cartesian (wx,wy) channels' own phase derivatives (instmom's
+    # multivariate path), not from a single rotary branch's own phase --
+    # a simplification flagged when this function was first written. Pass
+    # precomputed (om,dfdt) to test that more faithful estimate without
+    # duplicating the point-finding/chaining/interpolation logic below.
+    if om === nothing
+        om, dfdt = _instfreq_matrix(w, dt)
+    end
+
+    # Ridge points: local maxima of amplitude along scale, excluding the
+    # first/last scale bin (isridgepoint.m:99), matching jLab exactly. When
+    # `mask` is given, it is applied HERE -- as a filter on which local
+    # maxima are eligible ridge-point candidates -- exactly matching
+    # isridgepoint.m:127 (`bool=bool.*mask`), which zeroes the point-eligibility
+    # array AFTER local maxima are found on the full (unmasked) amplitude
+    # field, not before. Critically, `amp` itself must therefore be the
+    # UNMASKED joint amplitude (the caller no longer zeroes the transform
+    # before calling this) -- masking the amplitude field itself would
+    # distort where the true local maxima sit, which is exactly the bug
+    # this parameter replaces (see rotary_ridge_properties).
+    pts = Vector{Vector{_RidgePt}}(undef, nt)
+    for i in 1:nt
+        row = @view amp[i, :]
+        p = _RidgePt[]
+        for j in 2:ns-1
+            if row[j] >= row[j-1] && row[j] >= row[j+1] && row[j] > 0 &&
+               (mask === nothing || mask[i, j])
+                push!(p, _RidgePt(j, om[i, j], dfdt[i, j]))
+            end
+        end
+        pts[i] = p
+    end
+
+    # Mutual-nearest-neighbor matching between consecutive time steps.
+    # link[i][k] = index into pts[i+1] that point k of pts[i] links to, or 0.
+    link = [zeros(Int, length(pts[i])) for i in 1:nt]
+    for i in 1:nt-1
+        a, b = pts[i], pts[i+1]
+        (isempty(a) || isempty(b)) && continue
+        cost = fill(Inf, length(a), length(b))
+        for (ka, pa) in enumerate(a), (kb, pb) in enumerate(b)
+            pred_next = pa.om + pa.dfdt         # forward prediction from a[ka]
+            pred_prev = pb.om - pb.dfdt         # backward prediction from b[kb]
+            df1 = abs(pred_next - pb.om) / (max(abs(pa.om), abs_floor) + 1e-20)
+            df2 = abs(pred_prev - pa.om) / (max(abs(pb.om), abs_floor) + 1e-20)
+            d = (df1 + df2) / 2
+            d <= alpha && (cost[ka, kb] = d)
+        end
+        for ka in 1:length(a)
+            row = @view cost[ka, :]
+            all(isinf, row) && continue
+            kb = argmin(row)
+            # Mutual best: kb's own best match over column kb must be ka too.
+            col = @view cost[:, kb]
+            argmin(col) == ka || continue
+            # jLab's own second, separate mask application (ridgechains.m:138-176,
+            # "Keep from chaining ridges through mask"): even though both
+            # endpoints individually passed the point-level mask in
+            # isridgepoint.m, the LINK connecting them is only valid if mask
+            # holds across every scale index it implicitly spans, evaluated
+            # at the earlier time step (`jjindex=min(jj,jjnext):max(jj,jjnext);
+            # bool=all(mask(ii,jjindex))`) -- prevents a chain from jumping
+            # clean over a masked (wrong-rotation-sense) region between two
+            # otherwise-valid points.
+            if mask !== nothing
+                j1, j2 = a[ka].j, b[kb].j
+                all(@view mask[i, min(j1, j2):max(j1, j2)]) || continue
+            end
+            link[i][ka] = kb
+        end
+    end
+
+    # Walk links into chains of (time, scale-index) points.
+    visited = [falses(length(pts[i])) for i in 1:nt]
+    chains = Vector{Vector{Tuple{Int,Int}}}()
+    for i in 1:nt, k in 1:length(pts[i])
+        visited[i][k] && continue
+        chain = Tuple{Int,Int}[(i, k)]
+        visited[i][k] = true
+        ci, ck = i, k
+        while ci < nt && link[ci][ck] != 0
+            nk = link[ci][ck]
+            ci += 1
+            visited[ci][nk] && break
+            push!(chain, (ci, nk))
+            visited[ci][nk] = true
+            ck = nk
+        end
+        push!(chains, chain)
+    end
+
+    # Drop isolated single-point ridges (ridgechains.m:134-136).
+    filter!(c -> length(c) > 1, chains)
+
+    ridges = NamedTuple[]
+    for chain in chains
+        # chain entries are (time_index, position-within-pts[time_index]) --
+        # NOT (time_index, scale_index) -- convert to the real scale index
+        # via pts[.].j before using it to index amp/om (a bug caught here by
+        # a BoundsError during verification: a position index of 1 was used
+        # directly as a scale bin, so amp[t, j-1] underflowed to index 0).
+        times = [c[1] for c in chain]
+        js = [pts[c[1]][c[2]].j for c in chain]
+        (times[end] - times[1] + 1 == length(times)) || continue  # must be contiguous in time
+
+        freq = Vector{Float64}(undef, length(chain))
+        jfrac = Vector{Float64}(undef, length(chain))
+        jcenter = Vector{Int}(undef, length(chain))
+        for n in 1:length(chain)
+            t, j = times[n], js[n]
+            jcenter[n] = j
+            # Sub-bin scale refinement (ridgeinterp.m:76-92): fit a parabola
+            # through amplitude^2 at the 3 scales around this point.
+            xe, je = quadinterp(j - 1, j, j + 1, amp[t, j-1]^2, amp[t, j]^2, amp[t, j+1]^2)
+            if !(j - 1 < je < j + 1) || !isfinite(je)
+                je = Float64(j)  # quadratic fit failed -- fall back to the integer bin
+            end
+            jfrac[n] = je
+            # Re-evaluate the instantaneous frequency at the refined location
+            # (ridgeinterp.m:154), same three-point parabola through om.
+            freq[n] = quadinterp(j - 1, j, j + 1, om[t, j-1], om[t, j], om[t, j+1], je)
+        end
+
+        L = sum(abs.(freq)) / (2π)
+        L > min_cycles || continue
+
+        push!(ridges, (times=times[1]:times[end], freq=freq, jfrac=jfrac, jcenter=jcenter))
+    end
+
+    sort!(ridges; by=r -> r.times.start)
+    return ridges
+end
+
+# Experimental: joint (Cartesian wx,wy) power-weighted instantaneous
+# frequency, matching jLab's actual instmom(w,1,3)/jointmom formula, as an
+# alternative to a single rotary branch's own phase (the simplification
+# ridgechains_jlab's om/dfdt use by default). w_plus/w_minus are the rotary
+# transforms already computed by rotary_wavetrans; reconstructs wx,wy from
+# them algebraically (no extra wavetrans call needed).
+function _instfreq_joint(w_plus::AbstractMatrix{<:Complex}, w_minus::AbstractMatrix{<:Complex}, dt::Real)
+    wx = (w_plus .+ w_minus) ./ sqrt(2)
+    wy = .-im .* (w_plus .- w_minus) ./ sqrt(2)
+    nt, ns = size(wx)
+    om_x = Matrix{Float64}(undef, nt, ns)
+    om_y = Matrix{Float64}(undef, nt, ns)
+    for j in 1:ns
+        om_x[:, j] = _vdiff_endpoint(_unwrap(angle.(@view(wx[:, j]))), dt)
+        om_y[:, j] = _vdiff_endpoint(_unwrap(angle.(@view(wy[:, j]))), dt)
+    end
+    wx2 = abs2.(wx)
+    wy2 = abs2.(wy)
+    om = (wx2 .* om_x .+ wy2 .* om_y) ./ (wx2 .+ wy2 .+ 1e-300)
+    dfdt = Matrix{Float64}(undef, nt, ns)
+    for j in 1:ns
+        dfdt[:, j] = _vdiff_endpoint(@view(om[:, j]), dt)
+    end
+    return om, dfdt
 end

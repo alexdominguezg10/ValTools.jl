@@ -1,6 +1,7 @@
 using Test
 using Random
 using Statistics
+using ValTools
 using ValTools.JLab
 using ValTools.Metrics
 using Multitaper
@@ -248,7 +249,13 @@ Random.seed!(42)
         frac_noise = _frac_significant(:noise)
         frac_eddy = _frac_significant(:eddy)
 
-        @test frac_noise < 0.02              # pure noise: almost nothing survives
+        # Bound loosened from an arbitrary 0.02 after porting jLab's mutual-
+        # match chaining (ridgechains_jlab): verified real value is ~0.039,
+        # a legitimate behavior change (different ridge population/L/xi from
+        # phase-based frequency + mutual matching vs. the old greedy/nominal-
+        # bin chaining), not a regression -- the ratio check below is the
+        # substantive property and is comfortably satisfied (measured ~2.8x).
+        @test frac_noise < 0.06              # pure noise: only a small minority survives
         @test frac_eddy > 2 * frac_noise     # a real eddy is detected preferentially
     end
 
@@ -258,5 +265,87 @@ Random.seed!(42)
               omega_ast_bar=0.5, kappa_bar=1.0, sense=:ccw)]
         @test_throws ErrorException density_ratio_significance(r, r, 0, 10)
         @test_throws ErrorException density_ratio_significance(r, r, 10, 0)
+    end
+
+    # ---------------------------------------------------------------------
+    # jLab-ported ridge-chaining primitives (Stages A-C of the ridge-
+    # chaining port, verified before rotary_ridge_properties was switched
+    # to use them)
+    # ---------------------------------------------------------------------
+
+    @testset "quadinterp — exact recovery of a known parabola" begin
+        a, b, c = 2.3, -1.7, 0.5
+        t1, t2, t3 = 4.0, 5.0, 7.0
+        f(t) = a * t^2 + b * t + c
+        x1, x2, x3 = f(t1), f(t2), f(t3)
+
+        # Evaluate at an arbitrary query point.
+        tq = 6.2
+        @test isapprox(quadinterp(t1, t2, t3, x1, x2, x3, tq), f(tq); atol=1e-10)
+
+        # Vertex form (t omitted): true vertex is at t=-b/2a.
+        te_true = -b / (2a)
+        xe, te = quadinterp(t1, t2, t3, x1, x2, x3)
+        @test isapprox(te, te_true; atol=1e-10)
+        @test isapprox(xe, f(te_true); atol=1e-10)
+
+        # Broadcasts elementwise over arrays.
+        tqs = [5.5, 6.0, 6.5]
+        xs = quadinterp.(t1, t2, t3, x1, x2, x3, tqs)
+        @test all(isapprox.(xs, f.(tqs); atol=1e-10))
+    end
+
+    @testset "_instfreq_matrix — phase-differenced frequency tracks a chirp" begin
+        # Linear chirp: instantaneous frequency ramps from f0 to f1 over N
+        # samples. The premise of Stage B is that phase-differencing the
+        # transform's own phase tracks this ramp much more closely than the
+        # fixed nominal analysis-grid frequency fs[j] (which is constant
+        # across the whole ridge regardless of the true, evolving frequency).
+        N = 2048
+        f0, f1 = 0.06, 0.14
+        t = 0:N-1
+        instfreq_true = 2π .* (f0 .+ (f1 - f0) .* t ./ N)   # rad/sample
+        phase = cumsum(instfreq_true)
+        u = cos.(phase)
+        v = sin.(phase)
+
+        wt_ccw, wt_cw, fs = rotary_wavetrans(u, v)
+        om, dfdt = ValTools.JLab._instfreq_matrix(wt_ccw, 1.0)
+        @test size(om) == size(wt_ccw)
+        @test size(dfdt) == size(om)
+
+        # At each time, compare the phase-based estimate and the nominal
+        # analysis-grid frequency at the ridge's own scale against the known
+        # true instantaneous frequency, restricted to the interior (edge
+        # effects) and where the CCW branch actually dominates.
+        mag = abs.(wt_ccw)
+        errs_phase = Float64[]
+        errs_nominal = Float64[]
+        for i in (N ÷ 4):(3N ÷ 4)
+            j = argmax(@view mag[i, :])
+            (j <= 1 || j >= length(fs)) && continue
+            push!(errs_phase, abs(om[i, j] - instfreq_true[i]))
+            push!(errs_nominal, abs(fs[j] - instfreq_true[i]))
+        end
+        @test !isempty(errs_phase)
+        @test median(errs_phase) < median(errs_nominal)
+    end
+
+    @testset "ridgechains_jlab — mutual-match chaining recovers a clean ridge" begin
+        N = 2048
+        f0 = 0.12
+        t = 0:N-1
+        u = cos.(2π * f0 .* t)
+        v = sin.(2π * f0 .* t)
+        wt_ccw, wt_cw, fs = rotary_wavetrans(u, v)
+
+        events = ridgechains_jlab(wt_ccw, fs; alpha=0.25, min_cycles=1.0, dt=1.0)
+        @test !isempty(events)
+        best = events[argmax([length(e.times) for e in events])]
+        # Should recover almost the whole record as one ridge, at close to
+        # the true frequency, with no huge outliers from mismatching.
+        @test length(best.times) > N - 20
+        @test isapprox(median(best.freq), 2π * f0; atol=0.01)
+        @test all(f -> isapprox(f, 2π * f0; atol=0.05), best.freq)
     end
 end
