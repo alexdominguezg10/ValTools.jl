@@ -2,6 +2,7 @@ using Test
 using Random
 using Statistics
 using ValTools.JLab
+using ValTools.Metrics
 using Multitaper
 
 Random.seed!(42)
@@ -110,5 +111,152 @@ Random.seed!(42)
         res_cw = rotary_ridge(u, v_cw; dt=dt, nv=8)
         valid_cw = .!isnan.(res_cw.rotary_coefficient)
         @test mean(res_cw.rotary_coefficient[valid_cw]) < -0.8
+    end
+
+    # ---------------------------------------------------------------------
+    # Isotropic rotary noise model (Lilly & Perez-Brunius 2021, Sect. 4.3)
+    # ---------------------------------------------------------------------
+
+    @testset "rotary_noise_spectrum — Eq. 70 variance preservation" begin
+        N = 1024
+        t = 0:N-1
+        rng = MersenneTwister(11)
+        u = 2.0 .* cos.(2π * 0.1 .* t) .+ 0.5 .* randn(rng, N)
+        v = 2.0 .* sin.(2π * 0.1 .* t) .+ 0.5 .* randn(rng, N)
+
+        spec = rotary_noise_spectrum(u, v; dt_hours=1.0, nw=4.0)
+
+        # Eq. 70 rescales the pointwise minimum so total variance is retained.
+        @test isapprox(sum(spec.S_iso), sum(spec.S_full); rtol=1e-10)
+        # A pointwise min always undershoots, so the correction is > 1.
+        @test spec.c_eps > 1.0
+        @test all(spec.S_iso .>= 0)
+        @test length(spec.freq) == N
+    end
+
+    @testset "rotary_noise_surrogate — variance and isotropy" begin
+        N = 1024
+        t = 0:N-1
+        rng = MersenneTwister(12)
+        # Strongly CCW-polarized: rotationally ANISOTROPIC input.
+        u = 2.0 .* cos.(2π * 0.1 .* t) .+ 0.5 .* randn(rng, N)
+        v = 2.0 .* sin.(2π * 0.1 .* t) .+ 0.5 .* randn(rng, N)
+        target_var = var(u .- mean(u)) + var(v .- mean(v))
+
+        vars = Float64[]
+        rcs = Float64[]
+        for s in 1:30
+            ex, ey = rotary_noise_surrogate(u, v; dt_hours=1.0, nw=4.0,
+                                            rng=MersenneTwister(500 + s))
+            @test length(ex) == N && length(ey) == N
+            push!(vars, var(ex) + var(ey))
+            rs = rotary_spectrum(ex, ey; dt_hours=1.0, nw=4.0, ci=false, ftest=false)
+            w = rs.S_ccw .+ rs.S_cw
+            push!(rcs, sum(rs.rotary_coefficient .* w) / sum(w))
+        end
+
+        # Realized variance matches the prescribed spectrum's integral.
+        # (An earlier implementation was off by exactly a factor of N here.)
+        @test isapprox(mean(vars), target_var; rtol=0.10)
+
+        # The whole point of the null model: surrogates carry no preferred
+        # rotation sense, even though the input is strongly CCW.
+        rs_orig = rotary_spectrum(u .- mean(u), v .- mean(v); dt_hours=1.0,
+                                  nw=4.0, ci=false, ftest=false)
+        w0 = rs_orig.S_ccw .+ rs_orig.S_cw
+        rc_orig = sum(rs_orig.rotary_coefficient .* w0) / sum(w0)
+        @test rc_orig > 0.5              # input is anisotropic
+        @test abs(mean(rcs)) < 0.10      # surrogates are not
+    end
+
+    # ---------------------------------------------------------------------
+    # One-sided ridges with ellipse properties
+    # ---------------------------------------------------------------------
+
+    @testset "rotary_ridge_properties — circularity ground truth" begin
+        N = 2048
+        f0 = 0.15
+        t = 0:N-1
+        u = cos.(2π * f0 .* t)
+
+        r_ccw = rotary_ridge_properties(u, sin.(2π * f0 .* t); f_coriolis=1.0)
+        @test !isempty(r_ccw)
+        best_ccw = r_ccw[argmax([x.npoints for x in r_ccw])]
+        @test isapprox(best_ccw.xi_bar, 1.0; atol=1e-3)     # circular CCW
+        @test best_ccw.sense === :ccw
+
+        r_cw = rotary_ridge_properties(u, -sin.(2π * f0 .* t); f_coriolis=1.0)
+        @test !isempty(r_cw)
+        best_cw = r_cw[argmax([x.npoints for x in r_cw])]
+        @test isapprox(best_cw.xi_bar, -1.0; atol=1e-3)     # circular CW
+        @test best_cw.sense === :cw
+
+        # Eq. 60: L counts cycles executed along the ridge. A fixed-frequency
+        # signal spanning the record does N*f0 of them (a little less in
+        # practice, from wavelet edge effects).
+        @test isapprox(best_ccw.L, N * f0; rtol=0.05)
+
+        # Purely rectilinear motion sits exactly on the one-sided mask
+        # boundary (|w+| == |w-|) and is deliberately not called an eddy.
+        @test isempty(rotary_ridge_properties(u, zeros(N); f_coriolis=1.0))
+    end
+
+    # ---------------------------------------------------------------------
+    # Density-ratio significance (Sect. 4.6)
+    # ---------------------------------------------------------------------
+
+    @testset "density_ratio_significance — rejects noise, keeps eddies" begin
+        N = 1024
+        f0 = 0.08
+        fcor = 0.25
+        n_rec, n_noise_per = 12, 3
+
+        function _build(kind, seed)
+            rng = MersenneTwister(seed)
+            t = 0:N-1
+            bx = cumsum(randn(rng, N)); by = cumsum(randn(rng, N))
+            bx = 0.35 .* bx ./ std(bx); by = 0.35 .* by ./ std(by)
+            if kind === :eddy
+                env = [(0.25N < i < 0.75N) ? 1.0 : 0.0 for i in 1:N]
+                return (1.2 .* env .* cos.(2π * f0 .* t) .+ bx,
+                        1.2 .* env .* sin.(2π * f0 .* t) .+ by)
+            end
+            return (bx, by)
+        end
+
+        function _frac_significant(kind)
+            data_r = NamedTuple[]; noise_r = NamedTuple[]
+            ndp = 0; nnp = 0
+            for k in 1:n_rec
+                u, v = _build(kind, 100 + k)
+                append!(data_r, rotary_ridge_properties(u, v; f_coriolis=fcor))
+                ndp += N
+                for s in 1:n_noise_per
+                    ex, ey = rotary_noise_surrogate(u, v; dt_hours=1.0, nw=4.0,
+                                                    rng=MersenneTwister(9000 + 100k + s))
+                    append!(noise_r, rotary_ridge_properties(ex, ey; f_coriolis=fcor))
+                    nnp += N
+                end
+            end
+            rho = density_ratio_significance(data_r, noise_r, ndp, nnp; alpha=4)
+            @test length(rho) == length(data_r)
+            @test all(r -> r >= 0, rho)          # never NaN: NaN would read as significant
+            @test !any(isnan, rho)
+            return count(<(0.1), rho) / max(length(data_r), 1)
+        end
+
+        frac_noise = _frac_significant(:noise)
+        frac_eddy = _frac_significant(:eddy)
+
+        @test frac_noise < 0.02              # pure noise: almost nothing survives
+        @test frac_eddy > 2 * frac_noise     # a real eddy is detected preferentially
+    end
+
+    @testset "density_ratio_significance — argument errors" begin
+        @test isempty(density_ratio_significance(NamedTuple[], NamedTuple[], 10, 10))
+        r = [(start=1, stop=10, npoints=10, L=2.0, xi_bar=0.9,
+              omega_ast_bar=0.5, kappa_bar=1.0, sense=:ccw)]
+        @test_throws ErrorException density_ratio_significance(r, r, 0, 10)
+        @test_throws ErrorException density_ratio_significance(r, r, 10, 0)
     end
 end

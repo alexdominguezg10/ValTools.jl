@@ -122,6 +122,7 @@ include("jdata.jl")
 export wavetrans, wavetrans_batch, tiredecode, transmax,
        morsewave, morsewave_freq, morsefreq, morseprops, morsespace,
        ridgemap, ridgechains, RidgeEvent, wavelet_significance, ridge_significant,
+       rotary_ridge_properties, density_ratio_significance,
        spectral_multitaper, mspec, sleptap,
        ellipsefit, rotary, rotary_wavetrans, rotary_ridge,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,

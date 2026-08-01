@@ -20,17 +20,20 @@ using Multitaper: multispec, dpss_tapers, MTSpectrum
 using Unitful
 using Dates
 using Statistics: mean
-using FFTW: fft
+using FFTW: fft, ifft
 using SpecialFunctions: erfinv
+using Random
 
 const JL = ValTools.JLab
 const Met = ValTools.Metrics
 
 import ValTools.JLab: spectral_multitaper, mspec, sleptap
-import ValTools.Metrics: rotary_spectrum, rotary_coherence, cross_coherence, ellipse_polarization
+import ValTools.Metrics: rotary_spectrum, rotary_coherence, cross_coherence, ellipse_polarization,
+                         rotary_noise_spectrum, rotary_noise_surrogate
 
 include("spectral_multitaper.jl")
 include("rotary_spectrum.jl")
+include("rotary_noise.jl")
 include("cross_coherence.jl")
 include("ellipse_polarization.jl")
 

@@ -54,6 +54,95 @@ function rotary_spectrum(u::AbstractVector, v::AbstractVector;
     error("rotary_spectrum requires Multitaper.jl. Load it first: `using Multitaper`")
 end
 
+"""
+    rotary_noise_spectrum(u, v; dt_hours=1.0, nw=4.0, ntapers=0, detrend="linear")
+
+Isotropic ("no preferred rotation sense") noise spectrum of a velocity time
+series `w = u + iv`, following Lilly & Perez-Brunius (2021, NPG) Sect. 4.3,
+Eqs. 69-70.
+
+The multitaper power spectrum of `w` is estimated on the **native two-sided
+FFT frequency grid**, then made rotationally isotropic by taking, at each
+frequency, the smaller of the CCW (`+ω`) and CW (`-ω`) power:
+
+    S_εε(ω) = c_ε · min{Ŝ(ω), Ŝ(-ω)}
+
+Because eddies and inertial oscillations raise the spectrum on *one* rotary
+side at a given frequency, taking the elementwise minimum strips out
+rotationally-anisotropic features (exactly the ones an eddy detector should
+be testing against a null) while retaining the record's real broadband
+spectral *shape* — unlike a parametric AR(1)/white null, which cannot
+represent an inertial peak at all. `c_ε` (Eq. 70) rescales so the isotropic
+spectrum integrates to the same total velocity variance as the original,
+compensating the fact that a pointwise minimum always underestimates.
+
+Use [`rotary_noise_surrogate`](@ref) to draw stochastic realizations from
+this spectrum for Monte Carlo significance testing.
+
+# Arguments
+- `u`, `v`: east-west / north-south velocity components (equal length)
+- `dt_hours`: sampling interval (hours by default; any consistent time unit)
+- `nw`: DPSS time-bandwidth product (default 4.0, the paper's choice)
+- `ntapers`: number of tapers (default: `2*floor(nw) - 1`)
+- `detrend`: `"none"`, `"constant"`, or `"linear"` (default `"linear"`)
+
+# Returns
+NamedTuple `(freq, S_iso, S_full, c_eps, params)`:
+- `freq`: two-sided FFT frequency grid (unshifted, i.e. `FFTW` bin order —
+  the same order `S_iso` is in, so it can be fed straight to `ifft`)
+- `S_iso`: the isotropic noise spectrum `S_εε`
+- `S_full`: the un-symmetrized multitaper spectrum `Ŝ` it was built from
+- `c_eps`: the Eq. 70 normalization constant actually applied
+
+# References
+Lilly, J. M., & Perez-Brunius, P. (2021). Extracting statistically
+significant eddy signals from large Lagrangian datasets using wavelet ridge
+analysis, with application to the Gulf of Mexico. Nonlin. Processes
+Geophys., 28, 181-212. Sect. 4.3, Eqs. 69-70.
+
+Requires `using Multitaper` to be loaded — the real implementation lives in
+the ValToolsMultitaperExt package extension.
+"""
+function rotary_noise_spectrum(u::AbstractVector, v::AbstractVector;
+                               dt_hours::Real=1.0,
+                               nw::Real=4.0,
+                               ntapers::Int=0,
+                               detrend::String="linear")
+    error("rotary_noise_spectrum requires Multitaper.jl. Load it first: `using Multitaper`")
+end
+
+"""
+    rotary_noise_surrogate(u, v; dt_hours=1.0, nw=4.0, ntapers=0, detrend="linear", rng=Random.default_rng())
+
+Draw one stochastic realization of the isotropic noise process defined by
+[`rotary_noise_spectrum`](@ref) — the null-hypothesis "no eddies" velocity
+series of Lilly & Perez-Brunius (2021) Sect. 4.3.
+
+The surrogate is built by multiplying complex Gaussian white noise by
+`sqrt(S_εε(ω))` at each frequency and inverse-transforming, giving a series
+with the prescribed isotropic spectrum but random phase — so it matches the
+original record's spectral shape and total variance while containing no
+organized (rotationally anisotropic) oscillations.
+
+# Returns
+`(εx, εy)`: two real velocity series (east/north components), same length
+as the input, with the input's temporal mean velocity added back.
+
+# References
+Lilly & Perez-Brunius (2021), Sect. 4.3. See [`rotary_noise_spectrum`](@ref).
+
+Requires `using Multitaper` to be loaded — the real implementation lives in
+the ValToolsMultitaperExt package extension.
+"""
+function rotary_noise_surrogate(u::AbstractVector, v::AbstractVector;
+                                dt_hours::Real=1.0,
+                                nw::Real=4.0,
+                                ntapers::Int=0,
+                                detrend::String="linear",
+                                rng=nothing)
+    error("rotary_noise_surrogate requires Multitaper.jl. Load it first: `using Multitaper`")
+end
+
 # NOTE: a `rotary_spectrum(u::Types.TimeSeriesVector, v::Types.TimeSeriesVector; ...)`
 # typed-stub method deliberately does NOT exist here. Unlike the
 # `AbstractVector` vs `AbstractVector{<:Real}` stub/extension split above

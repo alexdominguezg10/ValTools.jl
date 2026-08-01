@@ -1001,3 +1001,268 @@ function ridge_significant(ridge_freq::AbstractVector{<:Real},
     end
     return out
 end
+
+# ============================================================================
+# ONE-SIDED ROTARY RIDGES WITH ELLIPSE PROPERTIES
+# (Lilly & Perez-Brunius 2021, Sects. 2.2, 3.5, 3.7, 4.4)
+# ============================================================================
+
+"""
+    rotary_ridge_properties(u, v; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0,
+                            f_coriolis=1.0, min_cycles=2*sqrt(6)/pi, alpha=0.25)
+
+Extract **one-sided** wavelet ridges from a bivariate velocity series and
+summarize each one by its ellipse properties, following Lilly &
+Perez-Brunius (2021, NPG).
+
+"One-sided" (their Sect. 3.7) means a ridge is not permitted to switch
+rotation sense partway through: ridges are extracted twice, once with
+CW-dominant regions masked out and once with CCW-dominant regions masked
+out, and the two sets are combined. Real eddies do not reverse their sense
+of rotation, so ridges that do are artifacts of the background turbulence —
+excluding them structurally suppresses false positives, without having to
+impose an arbitrary eccentricity cutoff.
+
+Per-ridge properties come from the two rotary transform amplitudes
+`a⁺ = |w⁺|` and `a⁻ = |w⁻|`:
+
+- `κ² = (a⁺)² + (a⁻)²` — squared RMS ellipse radius (their Eq. 28)
+- `ξ = ((a⁺)² − (a⁻)²)/κ²` — signed circularity in `[-1, 1]` (their Eq. 9);
+  `+1` = circular counter-clockwise, `-1` = circular clockwise, `0` = linear
+- `ω* = sgn(ξ)·ω/f₀` — nondimensional signed frequency (their Eq. 63),
+  positive for cyclonic and negative for anticyclonic motion in the
+  Northern Hemisphere
+- `L = (1/2π)∫ω dt` — ridge length in number of cycles executed (their Eq. 60)
+
+Ridge-averaged quantities (`xi_bar`, `omega_ast_bar`) are **κ²-weighted**
+time averages along the ridge, per their Eq. 74 — not plain means, so that
+the high-amplitude portion of a ridge dominates its summary values.
+
+# Arguments
+- `u`, `v`: east-west / north-south velocity components (equal length)
+- `dt`: sampling interval (only used to build analysis frequencies when
+  `fs === nothing`; `L`/`omega` come back in radians per sample regardless)
+- `f_coriolis`: local Coriolis frequency **in radians per sample**, i.e. the
+  same units as the analysis frequencies, used to nondimensionalize `ω*`.
+  Defaults to `1.0`, which leaves `omega_ast_bar` as a plain radian
+  frequency — pass a real value to get the paper's nondimensional quantity.
+- `min_cycles`: minimum ridge length in cycles (their Eq. 61 threshold,
+  `2√6/π ≈ 1.6` for the default `β=8, γ=3` wavelet)
+- `alpha`: frequency-continuity tolerance passed to [`ridgechains`](@ref)
+
+# Returns
+`Vector{NamedTuple}`, one per surviving ridge, with fields `start`, `stop`,
+`npoints`, `L`, `xi_bar`, `omega_ast_bar`, `kappa_bar`, `sense`
+(`:ccw`/`:cw`, from the sign of `xi_bar`).
+
+# References
+Lilly & Perez-Brunius (2021), Nonlin. Processes Geophys. 28, 181-212.
+Lilly & Olhede (2010b) for the ellipse/rotary parameter relations.
+"""
+function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
+                                 dt::Real=1.0,
+                                 fs::Union{AbstractVector, Nothing}=nothing,
+                                 nv::Int=8,
+                                 gamma::Real=3.0,
+                                 beta::Real=8.0,
+                                 f_coriolis::Real=1.0,
+                                 min_cycles::Real=2*sqrt(6)/π,
+                                 alpha::Real=0.25)
+
+    length(u) == length(v) || error("u and v must have the same length")
+    abs(f_coriolis) > 0 || error("f_coriolis must be nonzero")
+
+    wt_ccw, wt_cw, fs_out = rotary_wavetrans(u, v; dt=dt, fs=fs, nv=nv,
+                                             gamma=gamma, beta=beta)
+
+    a_plus = abs.(wt_ccw)
+    a_minus = abs.(wt_cw)
+    kappa2 = a_plus .^ 2 .+ a_minus .^ 2
+    delta = a_plus .- a_minus          # >0 where CCW dominates
+    mag = sqrt.(kappa2)                # ||w(t,s)||, the total transform magnitude
+
+    ridges = NamedTuple[]
+
+    for side in (:ccw, :cw)
+        # Mask the opposite-rotation half-plane, then chain ridges on what
+        # remains. Zeroed entries can never be ridge points (ridgechains
+        # requires amplitude strictly above its threshold, default 0).
+        # Note the exactly-zero case (|w⁺| == |w⁻|, i.e. perfectly linear
+        # polarization) is excluded from BOTH sides and so yields no ridge at
+        # all. That is deliberate: a purely rectilinear oscillation is not an
+        # eddy, and it would in any case score X = L·|ξ̄|^α = 0 in
+        # `density_ratio_significance` and be rejected. Assigning it to one
+        # side instead would double-count it. In real (noisy) data `delta` is
+        # never identically zero, so this only bites on synthetic input.
+        masked = copy(mag)
+        if side === :ccw
+            masked[delta .<= 0] .= 0.0
+        else
+            masked[delta .>= 0] .= 0.0
+        end
+
+        events = ridgechains(complex.(masked), fs_out; alpha=alpha, min_length=1.0)
+
+        for e in events
+            times = e.start:e.stop
+            js = e.scale_idx
+            length(js) == length(times) || continue   # defensive: chains are contiguous
+
+            k2 = [kappa2[t, j] for (t, j) in zip(times, js)]
+            ap = [a_plus[t, j] for (t, j) in zip(times, js)]
+            am = [a_minus[t, j] for (t, j) in zip(times, js)]
+            sk2 = sum(k2)
+            sk2 > 0 || continue
+
+            xi = (ap .^ 2 .- am .^ 2) ./ k2
+            omega = e.freq                              # rad/sample
+            omega_ast = sign.(xi) .* omega ./ f_coriolis
+
+            # Eq. 60: ridge length in cycles (one sample per time step).
+            L = sum(abs.(omega)) / (2π)
+            L > min_cycles || continue
+
+            # Eq. 74: kappa^2-weighted ridge averages.
+            xi_bar = sum(k2 .* xi) / sk2
+            omega_ast_bar = sum(k2 .* omega_ast) / sk2
+            kappa_bar = sqrt(sk2 / length(k2))
+
+            push!(ridges, (start=e.start, stop=e.stop, npoints=length(times),
+                           L=L, xi_bar=xi_bar, omega_ast_bar=omega_ast_bar,
+                           kappa_bar=kappa_bar,
+                           sense=(xi_bar >= 0 ? :ccw : :cw)))
+        end
+    end
+
+    sort!(ridges; by=r -> r.start)
+    return ridges
+end
+
+# ============================================================================
+# DENSITY-RATIO SIGNIFICANCE CRITERION
+# (Lilly & Perez-Brunius 2021, Sect. 4.6, Eqs. 76-80)
+# ============================================================================
+
+"""
+    density_ratio_significance(data_ridges, noise_ridges, n_data_points, n_noise_points;
+                               alpha=4, delta_omega=0.25, n_bands=1000,
+                               n_bins=2000, x_max=20.0)
+
+Compute the density-ratio significance level `ρ_X` of each ridge, following
+Lilly & Perez-Brunius (2021) Sect. 4.6.
+
+Rather than thresholding on a physical property directly (radius, velocity,
+Rossby number — all of which are what we actually want to *study*, so
+cutting on them biases the result), significance is assessed on the combined
+parameter
+
+    X = L · |ξ̄|^alpha
+
+which rewards ridges that are both long-lived (`L`) and close to circularly
+polarized (`|ξ̄|`) — the two things coherent vortices are and background
+turbulence is not. `alpha = 4` is the paper's own choice, found by sweeping
+the exponent to maximize the number of oscillations judged significant.
+
+For each ridge, the frequency-local **survival functions** (fraction of
+ridge points, per data point, having a significance parameter greater than
+this ridge's `X`) are formed for the real data and for the noise, in
+overlapping bands of nondimensional frequency of width `delta_omega`. Their
+ratio
+
+    ρ_X = S^ε_X / S_X
+
+estimates the probability that a detection with these properties is a false
+positive: `ρ_X = 0.1` means such events occur only a tenth as often in the
+noise as in the data, so 1 in 10 is attributable to the null hypothesis.
+The paper accepts ridges with `ρ_X < 0.1`.
+
+Note this is a **global, two-pass** statistic: the survival functions pool
+ridges across the entire dataset, so significance cannot be decided one
+record at a time. Both `data_ridges` and `noise_ridges` must be the full
+pooled collections, and `n_data_points`/`n_noise_points` the corresponding
+total sample counts (the per-data-point normalization of their Eq. 77 is
+what makes two differently-sized collections comparable).
+
+# Arguments
+- `data_ridges`, `noise_ridges`: collections of NamedTuples as returned by
+  [`rotary_ridge_properties`](@ref) (need `L`, `xi_bar`, `omega_ast_bar`,
+  `npoints`)
+- `n_data_points`, `n_noise_points`: total number of time samples analyzed
+  in each collection (summed over all records, and over all noise
+  realizations for the noise)
+- `alpha`: exponent on `|ξ̄|` in the significance parameter
+- `delta_omega`: width of the nondimensional-frequency bands
+- `n_bands`, `n_bins`: resolution of the frequency / significance-parameter grids
+- `x_max`: upper edge of the `X` grid (values above are clamped into the top bin)
+
+# Returns
+`Vector{Float64}` of `ρ_X`, one per entry of `data_ridges`. Ridges whose
+data survival function is empty return `Inf` (rejected), never `NaN`.
+
+# References
+Lilly & Perez-Brunius (2021), Sect. 4.6, Eqs. 76-80.
+"""
+function density_ratio_significance(data_ridges, noise_ridges,
+                                    n_data_points::Real, n_noise_points::Real;
+                                    alpha::Real=4,
+                                    delta_omega::Real=0.25,
+                                    n_bands::Int=1000,
+                                    n_bins::Int=2000,
+                                    x_max::Real=20.0)
+
+    isempty(data_ridges) && return Float64[]
+    n_data_points > 0 || error("n_data_points must be positive")
+    n_noise_points > 0 || error("n_noise_points must be positive")
+
+    _X(r) = r.L * abs(r.xi_bar)^alpha
+
+    Xd = [_X(r) for r in data_ridges]
+    wd = [Float64(r.npoints) for r in data_ridges]
+    od = [r.omega_ast_bar for r in data_ridges]
+
+    Xn = isempty(noise_ridges) ? Float64[] : [_X(r) for r in noise_ridges]
+    wn = isempty(noise_ridges) ? Float64[] : [Float64(r.npoints) for r in noise_ridges]
+    on = isempty(noise_ridges) ? Float64[] : [r.omega_ast_bar for r in noise_ridges]
+
+    omega_lo = minimum(vcat(od, isempty(on) ? od : on)) - delta_omega
+    omega_hi = maximum(vcat(od, isempty(on) ? od : on)) + delta_omega
+    band_centers = range(omega_lo, omega_hi; length=n_bands)
+    band_step = n_bands > 1 ? step(band_centers) : one(Float64)
+
+    # Histogram of ridge POINTS (not ridge counts) over (frequency band, X bin),
+    # normalized per data point -- Eq. 77's ridge density.
+    function _accumulate(X, w, o, npts)
+        H = zeros(Float64, n_bands, n_bins)
+        isempty(X) && return H
+        for i in eachindex(X)
+            bin = clamp(1 + floor(Int, (X[i] / x_max) * n_bins), 1, n_bins)
+            # Bands are overlapping: a ridge contributes to every band whose
+            # center lies within delta_omega/2 of its frequency.
+            lo = max(1, 1 + ceil(Int, (o[i] - delta_omega/2 - omega_lo) / band_step))
+            hi = min(n_bands, 1 + floor(Int, (o[i] + delta_omega/2 - omega_lo) / band_step))
+            for b in lo:hi
+                H[b, bin] += w[i]
+            end
+        end
+        return H ./ npts
+    end
+
+    Hd = _accumulate(Xd, wd, od, n_data_points)
+    Hn = _accumulate(Xn, wn, on, n_noise_points)
+
+    # Eq. 79: survival function = reverse cumulative sum along X.
+    Sd = cumsum(Hd[:, end:-1:1]; dims=2)[:, end:-1:1]
+    Sn = cumsum(Hn[:, end:-1:1]; dims=2)[:, end:-1:1]
+
+    rho = Vector{Float64}(undef, length(data_ridges))
+    for i in eachindex(Xd)
+        bin = clamp(1 + floor(Int, (Xd[i] / x_max) * n_bins), 1, n_bins)
+        b = clamp(1 + round(Int, (od[i] - omega_lo) / band_step), 1, n_bands)
+        sd = Sd[b, bin]
+        # A data ridge always contributes to its own bin, so sd > 0 in
+        # practice; guard anyway and reject rather than emit NaN, which
+        # would compare false against any threshold and read as "significant".
+        rho[i] = sd > 0 ? Sn[b, bin] / sd : Inf
+    end
+    return rho
+end
