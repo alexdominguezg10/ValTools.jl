@@ -1047,9 +1047,34 @@ end
                             abs_floor=0.0, fmax_ratio=nothing, fmin_ratio=nothing,
                             D=nothing, eta=0.05)
 
-Extract **one-sided** wavelet ridges from a bivariate velocity series and
+Extract **one-sided** wavelet ridges from a bivariate signal `(u, v)` and
 summarize each one by its ellipse properties, following Lilly &
 Perez-Brunius (2021, NPG).
+
+**`u`, `v` must be the eddy-induced DISPLACEMENT (position residual), not
+velocity, to match jLab's actual GOMED-generating pipeline.** jLab's real
+`eddyridges.m` wavelet-transforms POSITION -- for real (lat, lon)
+trajectories, via `spheretrans.m:76`
+(`[wx,wy,wz]=wavetrans(x,y,z,...)` on the 3D Cartesian projection of
+lat/lon, then reprojected onto a local tangent plane) -- never velocity,
+despite Lilly's own comment left in `spheretrans.m` ("I think that the
+real answer is that I should decompose velocity, not displacement") that
+this function was never revisited to actually do that. Confirmed
+empirically (2026-08-01, "ValTools 7"): swapping this function's input
+from GulfDriftersOpen velocity (`u`,`v`) to a simple local tangent-plane
+position projection (`x=R·cos(lat₀)·(lon-lon₀)`, `y=R·(lat-lat₀)`) took
+the 28-case jLab cross-check harness (`scripts/jlab_crosscheck_*`) from
+mean Jaccard 0.575 (0/28 clean matches) to **0.957 (13/28 clean, 27/28
+"good")** -- the single largest factor found in the whole ridge-chaining
+investigation, well past any of the chaining/masking/frequency-grid fixes
+that came before it (all of which are still real and still needed, just
+not sufficient alone). See project_gomed_validation_results memory for
+the full trail. The argument names `u`,`v` are kept for now since the
+underlying math is signal-agnostic (works on any bivariate real time
+series) -- callers doing GOMED-faithful analysis must pass position, not
+velocity; this has NOT yet been wired into
+`scripts/case_study_gomed.jl`/`scripts/validate_gulfdrifters_significant.jl`,
+which still pass velocity as of this session.
 
 "One-sided" (their Sect. 3.7) means a ridge is not permitted to switch
 rotation sense partway through: ridges are extracted twice, once with
@@ -1075,7 +1100,9 @@ time averages along the ridge, per their Eq. 74 — not plain means, so that
 the high-amplitude portion of a ridge dominates its summary values.
 
 # Arguments
-- `u`, `v`: east-west / north-south velocity components (equal length)
+- `u`, `v`: east-west / north-south components of a bivariate signal (equal
+  length) -- displacement/position residual for GOMED-faithful analysis
+  (see note above), not velocity, despite the variable names
 - `dt`: sampling interval (only used to build analysis frequencies when
   `fs === nothing`; `L`/`omega` come back in radians per sample regardless)
 - `f_coriolis`: local Coriolis frequency **in radians per sample**, i.e. the

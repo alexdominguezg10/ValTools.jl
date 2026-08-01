@@ -80,9 +80,20 @@ for (idx, m) in enumerate(manifest)
 
     # Our own ridges on this segment
     i = id_to_idx[m.segment_id]
-    u, v, t, lat = data.u[i], data.v[i], data.time[i], data.lat[i]
+    u, v, t, lat, lon = data.u[i], data.v[i], data.time[i], data.lat[i], data.lon[i]
     f0 = 2π * inertial_frequency(mean(lat))
-    rr = rotary_ridge_properties(u, v; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64, boundary=:mirror)
+    # jLab's real eddyridges.m wavelet-transforms POSITION (spheretrans.m:
+    # [wx,wy,wz]=wavetrans(x,y,z,...) on the 3D Cartesian projection of
+    # lat/lon), not velocity -- confirmed by reading spheretrans.m directly
+    # (2026-08-01, "ValTools 7"). Simple fixed local tangent-plane
+    # approximation (not jLab's time-varying-center reprojection, but
+    # enough to test the hypothesis): x=R*cos(lat0)*(lon-lon0),
+    # y=R*(lat-lat0), R=6371 km.
+    R_EARTH = 6371.0
+    lat0, lon0 = mean(lat), mean(lon)
+    x_km = R_EARTH .* cosd(lat0) .* deg2rad.(lon .- lon0)
+    y_km = R_EARTH .* deg2rad.(lat .- lat0)
+    rr = rotary_ridge_properties(x_km, y_km; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64, boundary=:mirror)
     our_cands = [(t0=t[e.start], t1=t[e.stop], L=e.L, omega_ast=e.omega_ast_bar) for e in rr]
 
     if isempty(our_cands)
