@@ -1188,6 +1188,23 @@ Lilly, Scott & Olhede (2011), Geophys. Res. Lett. 38, L23605, for the
 beta=2 gamma=3 wavelet choice (their Sect. 3: "P_psi/pi = sqrt(6)/pi ~=
 0.78 in order to obtain a high degree of time concentration").
 """
+# jLab-faithful eddy-band grid (eddyridges.m:552-555), shared by both the
+# tangent-plane (`rotary_ridge_properties`) and spherical
+# (`rotary_ridge_properties_sphere`) entry points -- depends only on record
+# length `N` and the wavelet/Coriolis parameters, not on the input signal
+# itself. Only kicks in when the caller hasn't already supplied an explicit
+# `fs`. See `rotary_ridge_properties`'s docstring "Frequency-grid gap this
+# fixes" for why this exists.
+function _eddy_band_grid(N::Int, gamma::Real, beta::Real, f_coriolis::Real,
+                         fmax_ratio::Real, fmin_ratio::Real,
+                         D::Union{Int,Nothing}, eta::Real)
+    P, _, _ = morseprops(Float64(gamma), Float64(beta))
+    f_high = min(Float64(fmax_ratio) * f_coriolis, _morsehigh(gamma, beta, eta))
+    f_low = max(Float64(fmin_ratio) * f_coriolis, π * P / N)
+    dens = D === nothing ? 16 : D
+    return morsespace(gamma, beta, N; f_high=f_high, f_low=f_low, density=dens)
+end
+
 function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
                                  dt::Real=1.0,
                                  fs::Union{AbstractVector, Nothing}=nothing,
@@ -1207,22 +1224,184 @@ function rotary_ridge_properties(u::AbstractVector{<:Real}, v::AbstractVector{<:
     length(u) == length(v) || error("u and v must have the same length")
     abs(f_coriolis) > 0 || error("f_coriolis must be nonzero")
 
-    # jLab-faithful eddy-band grid (eddyridges.m:552-555), opt-in -- see
-    # docstring "Frequency-grid gap this fixes". Only kicks in when the
-    # caller hasn't already supplied an explicit fs.
     fs_use = fs
     if fs_use === nothing && fmax_ratio !== nothing && fmin_ratio !== nothing
-        P, _, _ = morseprops(Float64(gamma), Float64(beta))
-        N = length(u)
-        f_high = min(Float64(fmax_ratio) * f_coriolis, _morsehigh(gamma, beta, eta))
-        f_low = max(Float64(fmin_ratio) * f_coriolis, π * P / N)
-        dens = D === nothing ? 16 : D
-        fs_use = morsespace(gamma, beta, N; f_high=f_high, f_low=f_low, density=dens)
+        fs_use = _eddy_band_grid(length(u), gamma, beta, f_coriolis, fmax_ratio, fmin_ratio, D, eta)
     end
 
     wt_ccw, wt_cw, fs_out = rotary_wavetrans(u, v; dt=dt, fs=fs_use, nv=nv,
                                              gamma=gamma, beta=beta, boundary=boundary)
 
+    return _rotary_ridge_properties_core(wt_ccw, wt_cw, fs_out;
+                                         f_coriolis=f_coriolis, min_cycles=min_cycles,
+                                         alpha=alpha, abs_floor=abs_floor)
+end
+
+# (lat,lon) -> unit-sphere-normalized (phi,theta) in RADIANS, ported from
+# xyz2latlon.m (jSphere/xyz2latlon.m): normalize to the unit sphere first
+# (x,y,z need not already be on it -- callers pass a displaced position),
+# then phi=asin(z), theta=atan2(y,x). theta doesn't actually need the
+# normalization (atan2 is scale-invariant), only phi does.
+function _xyz2latlon_rad(x::Real, y::Real, z::Real)
+    Rmag = sqrt(x^2 + y^2 + z^2)
+    phi = asin(clamp(z / Rmag, -1.0, 1.0))
+    theta = atan(y, x)
+    return phi, theta
+end
+
+"""
+    rotary_wavetrans_sphere(lat, lon; dt=1.0, fs=nothing, nv=8, gamma=3.0,
+                            beta=8.0, boundary=:zeros, R=6371.0)
+
+jLab-faithful spherical counterpart of [`rotary_wavetrans`](@ref) — ported
+directly from `jWavelet/spheretrans.m`/`spheretrans_xyz2xy.m`, to close the
+residual ridge-fragmentation gap left by [`local_tangent_plane`](@ref)'s
+FIXED local-tangent-plane approximation (mean Jaccard vs. real jLab
+0.575->0.957, one remaining partial case; see
+project_gomed_validation_results memory).
+
+Where `local_tangent_plane` projects the trajectory to a flat (x,y) plane
+ONCE, at a single fixed center, before ever wavelet-transforming it, jLab's
+real `eddyridges.m` instead:
+
+1. Converts `(lat,lon)` to the EXACT 3D Cartesian position on a sphere of
+   radius `R` (`latlon2xyz.m`: `x=R·cos(lat)cos(lon)`, `y=R·cos(lat)sin(lon)`,
+   `z=R·sin(lat)`) — never approximated as flat.
+2. Wavelet-transforms EACH of `x`, `y`, `z` independently with the *same*
+   wavelet bank (three real-input [`wavetrans`](@ref) calls sharing one
+   frequency grid) — not a bivariate transform of a 2D projection.
+3. At every `(time, scale)` point, recenters: subtracts the wavelet
+   coefficient's real part from the point's own true position
+   (`xyz_new = xyz_actual - real(w)`) to get the "time-varying center of
+   the oscillation in each wavelet band", converts that back to
+   `(lat_new, lon_new)`, and projects `(wx,wy,wz)` onto the LOCAL horizontal
+   basis AT THAT RECENTERED POINT (not the trajectory's own true position) —
+   `uvw2hor.m`: `uh = wy·cos(θ) - wx·sin(θ)`, `vh = wz/cos(φ)` (exact when
+   `(wx,wy,wz)` is tangent to the sphere; see `uvw2hor.m`'s derivation).
+
+This means the tangent-plane orientation itself varies per time step AND
+per wavelet scale/band — the "time-varying-center-per-wavelet-band
+reprojection" `local_tangent_plane`'s docstring refers to as not yet done.
+
+# Returns
+Same shape as [`rotary_wavetrans`](@ref): `(wt_ccw, wt_cw, fs)`, ready to
+feed [`ridgemap`](@ref)/[`ridgechains_jlab`](@ref) or
+[`rotary_ridge_properties_sphere`](@ref) directly.
+
+# References
+jWavelet/spheretrans.m, jSphere/latlon2xyz.m, jSphere/xyz2latlon.m,
+jSphere/uvw2hor.m (jLab v1.7.1/v1.7.3, confirmed unchanged between the two).
+"""
+function rotary_wavetrans_sphere(lat::AbstractVector{<:Real}, lon::AbstractVector{<:Real};
+                                 dt::Real=1.0,
+                                 fs::Union{AbstractVector, Nothing}=nothing,
+                                 nv::Int=8,
+                                 gamma::Real=3.0,
+                                 beta::Real=8.0,
+                                 boundary::Symbol=:zeros,
+                                 R::Real=6371.0)
+    length(lat) == length(lon) || error("lat and lon must have the same length")
+    N = length(lat)
+    (N < 1) && error("Input must have at least 1 sample")
+
+    latv = collect(Float64, lat)
+    lonv = collect(Float64, lon)
+
+    # latlon2xyz.m: x=R*cosd(lat)*cosd(lon), y=R*cosd(lat)*sind(lon), z=R*sind(lat).
+    # (jLab unwraps lon in degrees before this, but cosd/sind are periodic so
+    # it's a mathematical no-op for x,y,z -- not ported.)
+    x = R .* cosd.(latv) .* cosd.(lonv)
+    y = R .* cosd.(latv) .* sind.(lonv)
+    z = R .* sind.(latv)
+
+    # Three independent real-input transforms sharing ONE frequency grid --
+    # pass fs= (not scales=) for y,z so they use the exact same grid the x
+    # call resolved, per this file's own established SENSE NOTE convention
+    # (validate_gulfdrifters_significant.jl).
+    wx, fs_out = wavetrans(x; dt=dt, fs=fs, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
+    wy, _ = wavetrans(y; dt=dt, fs=fs_out, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
+    wz, _ = wavetrans(z; dt=dt, fs=fs_out, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
+
+    n_scales = length(fs_out)
+    wxh = Matrix{ComplexF64}(undef, N, n_scales)
+    wyh = Matrix{ComplexF64}(undef, N, n_scales)
+
+    for j in 1:n_scales
+        for t in 1:N
+            xnew = x[t] - real(wx[t, j])
+            ynew = y[t] - real(wy[t, j])
+            znew = z[t] - real(wz[t, j])
+            phi_new, theta_new = _xyz2latlon_rad(xnew, ynew, znew)
+            wxh[t, j] = wy[t, j] * cos(theta_new) - wx[t, j] * sin(theta_new)
+            wyh[t, j] = wz[t, j] / cos(phi_new)
+        end
+    end
+
+    wt_ccw = wxh .+ im .* wyh
+    wt_cw = wxh .- im .* wyh
+    return wt_ccw, wt_cw, fs_out
+end
+
+"""
+    rotary_ridge_properties_sphere(lat, lon; dt=1.0, fs=nothing, nv=8,
+                                   gamma=3.0, beta=2.0, f_coriolis=1.0,
+                                   min_cycles=..., alpha=0.25, abs_floor=0.0,
+                                   fmax_ratio=nothing, fmin_ratio=nothing,
+                                   D=nothing, eta=0.05, boundary=:zeros, R=6371.0)
+
+Spherical counterpart of [`rotary_ridge_properties`](@ref): identical ridge
+detection/chaining/significance-input logic, but the wavelet transform comes
+from [`rotary_wavetrans_sphere`](@ref) (jLab's real `spheretrans.m`
+time-varying-center reprojection) instead of a fixed
+[`local_tangent_plane`](@ref) projection fed into [`rotary_wavetrans`](@ref).
+Takes `(lat, lon)` in degrees directly (not pre-projected `(x_km, y_km)`).
+
+All keyword arguments and the return shape (`Vector{NamedTuple}` with
+`start`, `stop`, `npoints`, `L`, `xi_bar`, `omega_ast_bar`, `kappa_bar`,
+`sense`) match `rotary_ridge_properties` exactly — see its docstring for
+the eddy-band-grid (`fmax_ratio`/`fmin_ratio`/`D`/`eta`) and wavelet-duration
+(`beta=2.0` default) rationale, both of which apply identically here.
+"""
+function rotary_ridge_properties_sphere(lat::AbstractVector{<:Real}, lon::AbstractVector{<:Real};
+                                        dt::Real=1.0,
+                                        fs::Union{AbstractVector, Nothing}=nothing,
+                                        nv::Int=8,
+                                        gamma::Real=3.0,
+                                        beta::Real=2.0,
+                                        f_coriolis::Real=1.0,
+                                        min_cycles::Real=2*sqrt(beta*gamma)/π,
+                                        alpha::Real=0.25,
+                                        abs_floor::Real=0.0,
+                                        fmax_ratio::Union{Real,Nothing}=nothing,
+                                        fmin_ratio::Union{Real,Nothing}=nothing,
+                                        D::Union{Int,Nothing}=nothing,
+                                        eta::Real=0.05,
+                                        boundary::Symbol=:zeros,
+                                        R::Real=6371.0)
+
+    length(lat) == length(lon) || error("lat and lon must have the same length")
+    abs(f_coriolis) > 0 || error("f_coriolis must be nonzero")
+
+    fs_use = fs
+    if fs_use === nothing && fmax_ratio !== nothing && fmin_ratio !== nothing
+        fs_use = _eddy_band_grid(length(lat), gamma, beta, f_coriolis, fmax_ratio, fmin_ratio, D, eta)
+    end
+
+    wt_ccw, wt_cw, fs_out = rotary_wavetrans_sphere(lat, lon; dt=dt, fs=fs_use, nv=nv,
+                                                    gamma=gamma, beta=beta, boundary=boundary, R=R)
+
+    return _rotary_ridge_properties_core(wt_ccw, wt_cw, fs_out;
+                                         f_coriolis=f_coriolis, min_cycles=min_cycles,
+                                         alpha=alpha, abs_floor=abs_floor)
+end
+
+# Shared ridge-detection/chaining core for both rotary_ridge_properties
+# (tangent-plane input) and rotary_ridge_properties_sphere (spherical
+# input) -- everything downstream of the wavelet transform itself doesn't
+# care where wt_ccw/wt_cw came from.
+function _rotary_ridge_properties_core(wt_ccw::AbstractMatrix{ComplexF64}, wt_cw::AbstractMatrix{ComplexF64},
+                                       fs_out::AbstractVector{Float64};
+                                       f_coriolis::Real, min_cycles::Real, alpha::Real, abs_floor::Real)
     a_plus = abs.(wt_ccw)
     a_minus = abs.(wt_cw)
     kappa2 = a_plus .^ 2 .+ a_minus .^ 2

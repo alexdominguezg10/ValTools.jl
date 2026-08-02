@@ -84,16 +84,14 @@ for (idx, m) in enumerate(manifest)
     f0 = 2π * inertial_frequency(mean(lat))
     # jLab's real eddyridges.m wavelet-transforms POSITION (spheretrans.m:
     # [wx,wy,wz]=wavetrans(x,y,z,...) on the 3D Cartesian projection of
-    # lat/lon), not velocity -- confirmed by reading spheretrans.m directly
-    # (2026-08-01, "ValTools 7"). Simple fixed local tangent-plane
-    # approximation (not jLab's time-varying-center reprojection, but
-    # enough to test the hypothesis): x=R*cos(lat0)*(lon-lon0),
-    # y=R*(lat-lat0), R=6371 km.
-    R_EARTH = 6371.0
-    lat0, lon0 = mean(lat), mean(lon)
-    x_km = R_EARTH .* cosd(lat0) .* deg2rad.(lon .- lon0)
-    y_km = R_EARTH .* deg2rad.(lat .- lat0)
-    rr = rotary_ridge_properties(x_km, y_km; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64, boundary=:mirror)
+    # lat/lon, then reprojected onto the LOCAL horizontal at each
+    # (time,scale) point's own time-varying-center-per-wavelet-band, not a
+    # single fixed tangent plane) -- confirmed by reading spheretrans.m
+    # directly (2026-08-01, "ValTools 7"), then ported exactly as
+    # rotary_ridge_properties_sphere (src/JLab/wavelets.jl). Supersedes the
+    # earlier fixed-tangent-plane approximation (mean Jaccard 0.575->0.957)
+    # tried first to confirm the position-vs-velocity hypothesis cheaply.
+    rr = rotary_ridge_properties_sphere(lat, lon; f_coriolis=f0, fmax_ratio=2, fmin_ratio=1/64, boundary=:mirror)
     our_cands = [(t0=t[e.start], t1=t[e.stop], L=e.L, omega_ast=e.omega_ast_bar) for e in rr]
 
     if isempty(our_cands)
