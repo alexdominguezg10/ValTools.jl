@@ -26,6 +26,76 @@ Random.seed!(42)
         @test_throws ErrorException ellipsefit([1.0, 2.0], [1.0])
     end
 
+    @testset "ellsig — round-trip amplitude/orientation sanity" begin
+        # Constant circular ellipse (lambda=0): |x|=|y|=kappa at every point,
+        # theta doesn't matter for a circle.
+        n = 200
+        kappa = fill(2.0, n)
+        lambda = zeros(n)
+        theta = fill(π/3, n)
+        phi = collect(range(0, 4π; length=n))
+
+        x, y = ellsig(kappa, lambda, theta, phi)
+        @test length(x) == n && length(y) == n
+        @test all(isapprox.(abs.(x), 2.0; atol=1e-10))
+        @test all(isapprox.(abs.(y), 2.0; atol=1e-10))
+    end
+
+    @testset "ellsig — error on mismatched lengths" begin
+        @test_throws ErrorException ellsig([1.0, 2.0], [0.1], [0.0, 0.0], [0.0, 0.0])
+    end
+
+    @testset "ellpol — P²=α²+β² identity (jLab's own ellpol_test)" begin
+        # Same synthetic case as jLab's ellpol_test (jEllipse/ellpol.m):
+        # exponentially growing kappa, constant lambda/theta, ramping phi.
+        t = collect(0.0:1.0:925.0)
+        kappa = 3 .* exp.(2 * 0.393 .* (t ./ 1000 .- 1))
+        lambda = fill(0.4, length(t))
+        phi = (t ./ 1000 .* 5) .* 2π
+        theta = fill(π/4, length(t))
+
+        r = ellpol(kappa, lambda, theta, phi)
+        @test isapprox(r.P^2, r.alpha^2 + r.beta^2; atol=1e-8)
+        # Cross-checked directly against real MATLAB jLab's ellpol.m on this
+        # exact input (2026-08-01): P=1.000000000000000,
+        # alpha=0.916515138991168, beta=0.400000000000000,
+        # kbar=2.053464499273220, rbar=1.965880073415533 — matches to
+        # floating-point precision.
+        @test isapprox(r.P, 1.0; atol=1e-10)
+        @test isapprox(r.alpha, 0.916515138991168; atol=1e-10)
+        @test isapprox(r.beta, 0.4; atol=1e-10)
+        @test isapprox(r.kbar, 2.053464499273220; atol=1e-8)
+        @test isapprox(r.rbar, 1.965880073415533; atol=1e-8)
+    end
+
+    @testset "ellpol — pure circular motion has zero beta, alpha=sign(lambda)" begin
+        # lambda=0 (circular): no linear-motion component, so beta≈0 and
+        # the rotary excess alpha should equal P (fully circularly polarized).
+        n = 300
+        kappa = fill(1.5, n)
+        lambda = zeros(n)
+        theta = fill(0.0, n)
+        phi = collect(range(0, 20π; length=n))  # many full rotations
+
+        r = ellpol(kappa, lambda, theta, phi)
+        @test isapprox(r.beta, 0.0; atol=1e-6)
+        @test isapprox(abs(r.alpha), r.P; atol=1e-6)
+        @test r.alpha > 0   # phi increasing => CCW => positive rotary energy
+    end
+
+    @testset "ellpol — pure rectilinear motion (lambda=±1) has zero alpha" begin
+        # lambda=1: purely linear (back-and-forth) motion, no net rotation.
+        n = 200
+        kappa = fill(1.0, n)
+        lambda = fill(1.0, n)
+        theta = fill(π/6, n)
+        phi = collect(range(0, 10π; length=n))
+
+        r = ellpol(kappa, lambda, theta, phi)
+        @test isapprox(r.alpha, 0.0; atol=1e-6)
+        @test isapprox(abs(r.beta), r.P; atol=1e-6)
+    end
+
     @testset "rotary — CW/CCW decomposition" begin
         dt = 0.1;  N = 500
         t = (0:N-1) .* dt

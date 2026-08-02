@@ -18,6 +18,18 @@ using Unitful
     # self-contained.
     include("types/runtests.jl")
 
+    # Same bug, same fix, found 2026-08-01 while adding ellpol/ellsig:
+    # test/jlab/runtests.jl (test_wavelets/test_spectral/test_timeseries/
+    # test_ellipse/test_validation/test_jdata -- everything covering the
+    # wavelet ridge, rotary, and ellipse code most of ValTools 7's session
+    # actually touched) was ALSO never included here. Every "full test
+    # suite" run this session before this fix only ever exercised
+    # types/runtests.jl + the tests written directly below -- the JLab
+    # module's own tests were being run manually, one file at a time, not
+    # as part of `Pkg.test("ValTools")`. See project_gomed_validation_results
+    # memory for the fuller story.
+    include("jlab/runtests.jl")
+
     @testset "build_stretching" begin
         sc_r, Cs_r = build_stretching(32, 7.0, 0.0; vstretching=4)
         @test length(sc_r) == 32
