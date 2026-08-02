@@ -76,6 +76,18 @@ gomed_sig = gomed[(gomed.rho_Lxi4 .< RHO_THRESHOLD) .& (gomed.omega_ast_bar .> O
 # --- Load our full-census output ----------------------------------------
 # Manual CSV parse (no CSV.jl dependency -- not in Project.toml, and adding
 # one wasn't part of the approved plan for this task).
+#
+# SCHEMA (rewritten 2026-08-01, "ValTools 7", when validate_gulfdrifters_significant.jl
+# switched from the old ad hoc eddy_census_significant/AR1 test to the
+# paper-faithful rotary_ridge_properties+density_ratio_significance path --
+# see that script's own header for why): columns are now
+# drifter_id,segment_id,L,omega_ast_bar,sense,npoints,duration_hours,xi_bar,kappa_bar,rho_x
+# (was drifter_id,segment_id,L_est,omega_ast_est,sense,duration_hours,
+# mean_frequency_rad_per_hour,mean_amplitude). `kappa_bar` (ridge-averaged
+# joint rotary amplitude, kappa=sqrt(|wx|^2+|wy|^2)) is the natural successor
+# to the old `mean_amplitude` as the energy-proxy weight below -- both are
+# ridge-amplitude magnitudes used only for the energy-weighted sign-balance
+# comparison, never compared in absolute units against GOMED's own V_bar.
 function _read_our_csv(path)
     lines = readlines(path)
     rows = NamedTuple[]
@@ -84,9 +96,9 @@ function _read_our_csv(path)
         f = split(line, ",")
         push!(rows, (drifter_id=parse(Int, f[1]), segment_id=parse(Int, f[2]),
                       L_est=parse(Float64, f[3]), omega_ast_est=parse(Float64, f[4]),
-                      sense=f[5], duration_hours=parse(Float64, f[6]),
-                      mean_frequency_rad_per_hour=parse(Float64, f[7]),
-                      mean_amplitude=parse(Float64, f[8])))
+                      sense=f[5], npoints=parse(Int, f[6]), duration_hours=parse(Float64, f[7]),
+                      xi_bar=parse(Float64, f[8]), mean_amplitude=parse(Float64, f[9]),
+                      rho_x=parse(Float64, f[10])))
     end
     return DataFrame(rows)
 end
