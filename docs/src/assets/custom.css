@@ -1,0 +1,113 @@
+/* ValTools.jl Gallery — DemoCards-style grid (Phase 3) */
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1.25rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.demo-card,
+.demo-card-future {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.demo-card:visited {
+  color: inherit;
+}
+
+.demo-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.demo-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+  background: #f2f2f2;
+}
+
+.demo-card h3,
+.demo-card-future h3 {
+  margin: 0.85rem 1rem 0.35rem;
+  font-size: 1.05rem;
+}
+
+.demo-card p,
+.demo-card-future p {
+  margin: 0 1rem 1rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #555;
+  flex-grow: 1;
+}
+
+.demo-card-future {
+  border-style: dashed;
+  background: #fafafa;
+  opacity: 0.85;
+}
+
+.demo-card-future h3::after {
+  content: "Planned";
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #9a6b00;
+  background: #fff3cd;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  vertical-align: middle;
+}
+
+.demo-card-future p {
+  color: #888;
+}
+
+/* Documenter dark theme (html.theme--documenter-dark) */
+html.theme--documenter-dark .demo-card,
+html.theme--documenter-dark .demo-card-future {
+  background: #282f2f;
+  border-color: #3a4344;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+html.theme--documenter-dark .demo-card:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+html.theme--documenter-dark .demo-card img {
+  background: #1f2424;
+}
+
+html.theme--documenter-dark .demo-card p,
+html.theme--documenter-dark .demo-card-future p {
+  color: #c0c8c8;
+}
+
+html.theme--documenter-dark .demo-card-future {
+  background: #23292a;
+}
+
+html.theme--documenter-dark .demo-card-future p {
+  color: #8a9494;
+}
+
+html.theme--documenter-dark .demo-card-future h3::after {
+  color: #ffe8a3;
+  background: #4a3c10;
+}

@@ -106,6 +106,7 @@ try
         format = Documenter.HTML(
             prettyurls = false,
             collapselevel = 2,
+            assets = ["assets/custom.css"],
         ),
         sitename = "ValTools.jl",
         authors = "Alex Dominguez",

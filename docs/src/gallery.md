@@ -5,9 +5,11 @@ The ValTools.jl gallery showcases every major capability of the package — from
 ## Getting Started
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<div class="demo-card-future">
   <h3>💧 5-Minute Tour</h3>
-  <p><i>Coming in Phase 1: a gentle introduction to Unitful types, time series objects, and dispatch-based plotting.</i></p>
+  <p>A gentle introduction to Unitful types, time series objects, and dispatch-based plotting.</p>
+</div>
 </div>
 ```
 
@@ -18,131 +20,143 @@ The ValTools.jl gallery showcases every major capability of the package — from
 These examples demonstrate the crown jewel of ValTools.jl: wavelet analysis for oceanographic signals.
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<a class="demo-card" href="generated/inertial_oscillation.html">
+  <img src="assets/inertial_oscillation_thumb.png" alt="Inertial oscillation">
   <h3>🌊 Detecting Inertial Oscillations</h3>
   <p>Simulate 40 days of noisy current-meter data at 25°N and use rotary spectral decomposition to recover the 26.7-hour inertial period. Shows hodograph + rotary spectrum.</p>
-  <img src="assets/inertial_oscillation_thumb.png" alt="Inertial oscillation">
-</div>
+</a>
 
-<div class="demo-card">
+<a class="demo-card" href="generated/eddy_spindown.html">
+  <img src="assets/eddy_spindown_thumb.png" alt="Eddy spindown">
   <h3>🌀 Tracking Eddy Decay with Wavelets</h3>
   <p>A rotating eddy slows down over 30 days. The wavelet ridge chain tracks the time-varying frequency and amplitude, capturing the spin-down dynamics.</p>
-  <img src="assets/eddy_spindown_thumb.png" alt="Eddy spindown">
-</div>
+</a>
 
-<div class="demo-card">
+<a class="demo-card" href="generated/ridge_ellipse_polarization.html">
+  <img src="assets/ridge_ellipse_polarization_thumb.png" alt="Ridge polarization">
   <h3>🔄 Ridge Ellipse Polarization</h3>
   <p>Extract polarization parameters (ellipticity, orientation, phase) from a wavelet ridge. Useful for characterizing rotational modes (clockwise vs. counter-clockwise).</p>
-  <img src="assets/ridge_ellipse_polarization_thumb.png" alt="Ridge polarization">
-</div>
+</a>
 
-<div class="demo-card">
+<a class="demo-card" href="generated/multivariate_common_oscillation.html">
+  <img src="assets/multivariate_common_oscillation_thumb.png" alt="Multivariate ridges">
   <h3>📊 Multivariate Wavelet Ridge Analysis</h3>
   <p>Track multiple ocean variables (u, v, SST, SSH) simultaneously using a joint wavelet transform. Identify common oscillations across the system.</p>
-  <img src="assets/multivariate_common_oscillation_thumb.png" alt="Multivariate ridges">
-</div>
+</a>
 
-<div class="demo-card">
+<a class="demo-card" href="generated/svd_polarization_detection.html">
+  <img src="assets/svd_polarization_detection_thumb.png" alt="SVD polarization">
   <h3>🔍 SVD-Based Polarization Detection</h3>
   <p>Use singular-value decomposition (Msvd) to extract dominant polarization modes from multi-channel velocity data. No assumptions about rotation sense.</p>
-  <img src="assets/svd_polarization_detection_thumb.png" alt="SVD polarization">
+</a>
 </div>
 ```
 
 ### Multitaper Spectral Analysis
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<a class="demo-card" href="generated/multitaper_line_detection.html">
+  <img src="assets/multitaper_line_detection_thumb.png" alt="Line detection">
   <h3>📈 Line Detection with F-Tests</h3>
   <p>Identify statistically significant harmonic lines (e.g., M₂ tidal constituent) in noisy spectral estimates using Thomson's harmonic F-test.</p>
-  <img src="assets/multitaper_line_detection_thumb.png" alt="Line detection">
-</div>
+</a>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🎯 Rotary Spectrum with Confidence Intervals</h3>
-  <p><i>Coming in Phase 2: split velocity time series into counter-clockwise and clockwise components, with jackknife confidence intervals for each.</i></p>
+  <p>Split velocity time series into counter-clockwise and clockwise components, with jackknife confidence intervals for each.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🌐 2-D Wavenumber Spectra</h3>
-  <p><i>Coming in Phase 2: along-track wavenumber spectrum from SWOT or satellite observations, showing mesoscale/submesoscale structure.</i></p>
+  <p>Along-track wavenumber spectrum from SWOT or satellite observations, showing mesoscale/submesoscale structure.</p>
+</div>
 </div>
 ```
 
 ## Model Readers & Loaders
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<div class="demo-card-future">
   <h3>🗂️ Observation Zoo (Loaders Overview)</h3>
-  <p><i>Coming in Phase 2: a unified tour of all 11 observation loaders (Argo, DUACS, SWOT, NDBC, RAFOS, IES, thermistor, mooring, glider, CloudDrift, CANEK).</i></p>
+  <p>A unified tour of all 11 observation loaders (Argo, DUACS, SWOT, NDBC, RAFOS, IES, thermistor, mooring, glider, CloudDrift, CANEK).</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>💾 Reading CROCO/ROMS Output</h3>
-  <p><i>Coming in Phase 2: load SSH, temperature, salinity, velocities from a NetCDF model output; demonstrate sigma-to-z transform (CPU and GPU).</i></p>
+  <p>Load SSH, temperature, salinity, velocities from a NetCDF model output; demonstrate sigma-to-z transform (CPU and GPU).</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🏗️ Gravitational Equivalent Model from Argo</h3>
-  <p><i>Coming in Phase 2: build a 3-D density-gradient model from Argo profiles; extract SSH anomaly estimates for comparision with satellite.</i></p>
+  <p>Build a 3-D density-gradient model from Argo profiles; extract SSH anomaly estimates for comparison with satellite.</p>
+</div>
 </div>
 ```
 
 ## Colocation & Validation
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<a class="demo-card" href="generated/mooring_array_batch.html">
+  <img src="assets/mooring_array_batch_thumb.png" alt="Mooring colocation">
   <h3>🎯 Colocation: Model vs. Mooring Array</h3>
   <p>Interpolate model fields (CROCO) to a mooring location; compute Taylor diagram statistics and bias/RMSE breakdowns by season.</p>
-  <img src="assets/mooring_array_batch_thumb.png" alt="Mooring colocation">
-</div>
+</a>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🚫 Mooring Knockdown Correction</h3>
-  <p><i>Coming in Phase 2: account for vertical motion of moored instruments under strong currents; correct depth-averaged fields using knockdown dynamics.</i></p>
+  <p>Account for vertical motion of moored instruments under strong currents; correct depth-averaged fields using knockdown dynamics.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🌊 Virtual Mooring Synthesis</h3>
-  <p><i>Coming in Phase 2: extract a synthetic mooring time series from model output at arbitrary depths; compare to real mooring records.</i></p>
+  <p>Extract a synthetic mooring time series from model output at arbitrary depths; compare to real mooring records.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🛰️ Drifter Trajectory Colocation</h3>
-  <p><i>Coming in Phase 2: follow a drifter's path with model velocity fields; separate Lagrangian drift from Eulerian shear.</i></p>
+  <p>Follow a drifter's path with model velocity fields; separate Lagrangian drift from Eulerian shear.</p>
+</div>
 </div>
 ```
 
 ## GPU Acceleration
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<div class="demo-card-future">
   <h3>⚡ CPU vs. GPU Wavelet Transform Benchmark</h3>
-  <p><i>Coming in Phase 2: time a batched wavelet transform on CPU (Threads.@threads) vs. GPU (CUDA); show 10–15× speedup on H200.</i></p>
+  <p>Time a batched wavelet transform on CPU (Threads.@threads) vs. GPU (CUDA); show 10–15× speedup on H200.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🎨 LIC Flow Visualization (GPU)</h3>
-  <p><i>Coming in Phase 2: Line-Integral Convolution texture rendering of a 2-D velocity field, computed entirely on GPU via CUDA kernels.</i></p>
+  <p>Line-Integral Convolution texture rendering of a 2-D velocity field, computed entirely on GPU via CUDA kernels.</p>
+</div>
 </div>
 ```
 
 ## Case Studies (Flagship Demonstrations)
 
 ```@raw html
-<div class="demo-card">
+<div class="demo-grid">
+<div class="demo-card-future">
   <h3>🌀 GOMED Eddy Census</h3>
-  <p><i>Coming in Phase 3: extract cyclonic/anticyclonic eddies from CROCO output using wavelet ridge chains; compute census statistics (radius, decay rate, translation speed) and compare to satellite observations.</i></p>
+  <p>Extract cyclonic/anticyclonic eddies from CROCO output using wavelet ridge chains; compute census statistics (radius, decay rate, translation speed) and compare to satellite observations.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>🌊 GulfDrifters Velocity Wavenumber Spectrum</h3>
-  <p><i>Coming in Phase 3: analyze historical drifter velocities from GulfDrifters program; compute significant-wavenumber spectrum using rotary-wavelet decomposition.</i></p>
+  <p>Analyze historical drifter velocities from the GulfDrifters program; compute significant-wavenumber spectrum using rotary-wavelet decomposition.</p>
 </div>
 
-<div class="demo-card">
+<div class="demo-card-future">
   <h3>✅ End-to-End Mooring Validation</h3>
-  <p><i>Coming in Phase 3: start with CROCO model output, extract a virtual mooring at a real mooring location, colocate observations, compute spectral metrics, and build a Taylor diagram — demonstrating the full ValTools.jl pipeline.</i></p>
+  <p>Start with CROCO model output, extract a virtual mooring at a real mooring location, colocate observations, compute spectral metrics, and build a Taylor diagram — demonstrating the full ValTools.jl pipeline.</p>
+</div>
 </div>
 ```
 
@@ -151,6 +165,7 @@ These examples demonstrate the crown jewel of ValTools.jl: wavelet analysis for 
 These methods are in active development and will be added to the gallery as they land:
 
 ```@raw html
+<div class="demo-grid">
 <div class="demo-card-future">
   <h3>📐 Parametric Spectral Analysis</h3>
   <p><b>Planned:</b> Matérn covariance, debiased Whittle likelihood, composite oMp models, transfer function estimation, spectrograms.</p>
@@ -167,6 +182,7 @@ These methods are in active development and will be added to the gallery as they
   <h3>🌐 Advanced Colocation</h3>
   <p><b>Planned:</b> Section-based colocation (CANEK), trajectory-following on unstructured grids, spherical geometry handling.</p>
   <p><i>Status:</i> Core methods done; 2–3 examples planned.</p>
+</div>
 </div>
 ```
 
