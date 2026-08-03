@@ -1,4 +1,5 @@
 *.nc
 envs/*/Manifest.toml
+docs/Manifest.toml
 results/
 docs/build/
