@@ -600,26 +600,28 @@ function tiredecode(wt::AbstractMatrix{<:Complex}, fs::AbstractVector;
     kind == "phase"     && return angle.(wt)
     kind == "freq"      && return _instantaneous_frequency(wt)
     kind == "bandwidth" && return _instantaneous_bandwidth(wt)
-    error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\")")
+    kind == "curvature" && return instmom(wt)[4]
+    error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\", \"curvature\")")
 end
 
 # N-D method (trailing dims = independent signals, matching wavetrans's
-# output layout): amp/phase are pointwise and apply directly; freq/bandwidth
-# run the 2-D kernel per signal slice. The Matrix method above stays the
-# dispatch target for 2-D input.
+# output layout): amp/phase are pointwise and apply directly; freq/bandwidth/
+# curvature run the 2-D kernel per signal slice. The Matrix method above
+# stays the dispatch target for 2-D input.
 function tiredecode(wt::AbstractArray{<:Complex}, fs::AbstractVector;
                     kind::String="amp")
     size(wt, 2) == length(fs) || error("fs must match dimension 2 of wt")
 
     kind == "amp"   && return abs.(wt)
     kind == "phase" && return angle.(wt)
-    kind in ("freq", "bandwidth") ||
-        error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\")")
+    kind in ("freq", "bandwidth", "curvature") ||
+        error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\", \"curvature\")")
 
     N, nf = size(wt, 1), size(wt, 2)
     trailing = size(wt)[3:end]
     w3 = reshape(wt, N, nf, :)
-    out = Array{Float64, 3}(undef, N, nf, size(w3, 3))
+    T = kind == "curvature" ? ComplexF64 : Float64
+    out = Array{T, 3}(undef, N, nf, size(w3, 3))
     for k in axes(w3, 3)
         out[:, :, k] = tiredecode(@view(w3[:, :, k]), fs; kind=kind)
     end
@@ -1968,6 +1970,250 @@ function _instfreq_joint(w_plus::AbstractMatrix{<:Complex}, w_minus::AbstractMat
         dfdt[:, j] = _vdiff_endpoint(@view(om[:, j]), dt)
     end
     return om, dfdt
+end
+
+# ============================================================================
+# MULTIVARIATE INSTANTANEOUS MOMENTS & WAVELET RIDGE ANALYSIS
+# (Lilly & Olhede 2012, "Analysis of Modulated Multivariate Oscillations",
+# IEEE Trans. Signal Process. 60(2), 600-612; jRidges/instmom.m, ridgewalk.m,
+# isridgepoint.m)
+#
+# Unlike the rotary (CCW/CW) path above -- which is specific to the N=2
+# elliptical/rotary special case and does NOT generalize past N=2 -- this
+# section ports jLab's genuinely N-general joint-moment machinery: a
+# power-weighted average across N raw channels, with no cross-channel
+# covariance/tensor terms. Confirmed by reading jRidges/instmom.m's nested
+# `jointmom` and jRidges/isridgepoint.m directly (2026-08-03): jLab's own
+# real-data examples never exercise N>2, but the code and the underlying
+# theory (Lilly & Olhede 2012) are honestly N-agnostic, so this is a real
+# port, not a renamed bivariate special case.
+# ============================================================================
+
+"""
+    instmom(w::AbstractMatrix{<:Complex}; dt=1.0)
+
+Univariate instantaneous moments of a wavelet transform (or any per-column
+analytic signal), ported from jLab's `instmom.m`.
+
+# Returns
+`(a, om, upsilon, xi)`:
+- `a`: instantaneous amplitude, `abs.(w)`
+- `om`: instantaneous radian frequency, `d/dt arg(w)`
+- `upsilon`: instantaneous bandwidth, `d/dt ln|w|`
+- `xi`: instantaneous curvature (complex), `upsilon^2 + d/dt(upsilon) + i*d/dt(om)`
+
+`om`/`upsilon`/`xi` are identical to `tiredecode(w,fs;kind="freq"/"bandwidth")`
+computed with the `dt`-aware `_vdiff_endpoint` kernel; `instmom` bundles all
+four moments in one call since the joint (multivariate) formulas below need
+all of them at once.
+
+# References
+Lilly & Olhede (2010), IEEE Trans. Signal Process. 58(2), 591-603 (a, om, upsilon);
+Lilly & Olhede (2012), IEEE Trans. Signal Process. 60(2), 600-612 (xi, the
+*instantaneous curvature*). jRidges/instmom.m.
+"""
+function instmom(w::AbstractMatrix{<:Complex}; dt::Real=1.0)
+    nt, ns = size(w)
+    a = abs.(w)
+    om = Matrix{Float64}(undef, nt, ns)
+    upsilon = Matrix{Float64}(undef, nt, ns)
+    xi = Matrix{ComplexF64}(undef, nt, ns)
+    for j in 1:ns
+        om[:, j] = _vdiff_endpoint(_unwrap(angle.(@view(w[:, j]))), dt)
+        upsilon[:, j] = _vdiff_endpoint(log.(max.(@view(a[:, j]), 1e-300)), dt)
+        dupsilon = _vdiff_endpoint(@view(upsilon[:, j]), dt)
+        domega = _vdiff_endpoint(@view(om[:, j]), dt)
+        xi[:, j] = upsilon[:, j] .^ 2 .+ dupsilon .+ im .* domega
+    end
+    return a, om, upsilon, xi
+end
+
+"""
+    instmom(W::AbstractArray{<:Complex,3}; dt=1.0)
+
+Joint instantaneous moments of N channels stacked along the trailing
+dimension (jLab's `[JA,JOMEGA,JUPSILON,JXI]=INSTMOM(X1,...,XN,DIM)`), i.e.
+the multivariate generalization of [`instmom`](@ref)`(w)` above. Computes
+each channel's own univariate moments first, then combines them via jLab's
+`jointmom` formula -- a power-weighted average across channels, with no
+cross-channel covariance terms:
+
+- `ja = sqrt(mean_n |w_n|^2)` (RMS joint amplitude -- `instmom`'s own
+  convention; note [`multivariate_ridges`](@ref) instead uses the Euclidean
+  *sum* convention `sqrt(Σ_n|w_n|^2)` for ridge detection, matching
+  `isridgepoint.m`; the two differ by a factor of `sqrt(N)`, a
+  normalization-convention difference between jLab's own two use sites,
+  not a discrepancy in this port)
+- `jomega = Σ_n(a_n^2*om_n) / Σ_n(a_n^2)` (Lilly & Olhede 2012, Eq. 13)
+- `jupsilon = sqrt(Σ_n(a_n^2*|upsilon_n + i(om_n-jomega)|^2) / Σ_n(a_n^2))`
+- `jxi = sqrt(Σ_n(a_n^2*|xi_n + 2i*upsilon_n*(om_n-jomega) - (om_n-jomega)^2|^2) / Σ_n(a_n^2))`
+
+# Returns
+`(ja, jomega, jupsilon, jxi)`, each `(nt, ns)` -- one entry per (time,scale),
+collapsed across the channel dimension.
+
+# References
+Lilly & Olhede (2012), IEEE Trans. Signal Process. 60(2), 600-612, Eq. 13
+and Sect. III.D (deviation vectors). jRidges/instmom.m's nested `jointmom`.
+"""
+function instmom(W::AbstractArray{<:Complex,3}; dt::Real=1.0)
+    nt, ns, n_ch = size(W)
+    a = Array{Float64,3}(undef, nt, ns, n_ch)
+    om = Array{Float64,3}(undef, nt, ns, n_ch)
+    upsilon = Array{Float64,3}(undef, nt, ns, n_ch)
+    xi = Array{ComplexF64,3}(undef, nt, ns, n_ch)
+    for c in 1:n_ch
+        a[:, :, c], om[:, :, c], upsilon[:, :, c], xi[:, :, c] = instmom(@view(W[:, :, c]); dt=dt)
+    end
+
+    a2 = a .^ 2
+    sa2 = dropdims(sum(a2; dims=3); dims=3) .+ 1e-300
+
+    ja = sqrt.(dropdims(sum(a2; dims=3); dims=3) ./ n_ch)
+    jomega = dropdims(sum(a2 .* om; dims=3); dims=3) ./ sa2
+
+    jomega_rep = reshape(jomega, nt, ns, 1)
+    dev = upsilon .+ im .* (om .- jomega_rep)
+    jupsilon = sqrt.(dropdims(sum(a2 .* abs2.(dev); dims=3); dims=3) ./ sa2)
+
+    dom = om .- jomega_rep
+    dev2 = xi .+ (2 .* im) .* upsilon .* dom .- dom .^ 2
+    jxi = sqrt.(dropdims(sum(a2 .* abs2.(dev2); dims=3); dims=3) ./ sa2)
+
+    return ja, jomega, jupsilon, jxi
+end
+
+# General N-channel generalization of _instfreq_joint's power-weighted joint
+# instantaneous frequency (jLab's instmom(w,1,3)/jointmom formula), applied
+# directly to N raw wavetrans channels rather than via the 2-channel rotary
+# w+/w- reconstruction _instfreq_joint uses (which does not generalize past
+# N=2). On the N=2 case (wx,wy stacked along dim 3), this agrees with
+# _instfreq_joint(w_plus,w_minus,dt) to floating-point precision (tested).
+function _instfreq_joint_nd(W::AbstractArray{<:Complex,3}, dt::Real)
+    nt, ns, n_ch = size(W)
+    om_ch = Array{Float64,3}(undef, nt, ns, n_ch)
+    amp2_ch = Array{Float64,3}(undef, nt, ns, n_ch)
+    for c in 1:n_ch, j in 1:ns
+        om_ch[:, j, c] = _vdiff_endpoint(_unwrap(angle.(@view(W[:, j, c]))), dt)
+        amp2_ch[:, j, c] = abs2.(@view(W[:, j, c]))
+    end
+    num = dropdims(sum(amp2_ch .* om_ch; dims=3); dims=3)
+    den = dropdims(sum(amp2_ch; dims=3); dims=3) .+ 1e-300
+    om = num ./ den
+    dfdt = Matrix{Float64}(undef, nt, ns)
+    for j in 1:ns
+        dfdt[:, j] = _vdiff_endpoint(@view(om[:, j]), dt)
+    end
+    return om, dfdt
+end
+
+"""
+    multivariate_ridges(X::AbstractMatrix{<:Real}; dt=1.0, fs=nothing, nv=8,
+                        gamma=3.0, beta=2.0, boundary=:zeros,
+                        min_cycles=2*sqrt(beta*gamma)/pi, alpha=0.25, abs_floor=0.0)
+    multivariate_ridges(x1, x2, xs...; kwargs...)
+
+Multivariate wavelet ridge analysis (Lilly & Olhede 2012): extracts a
+modulated oscillation common to `N >= 2` simultaneously observed real
+channels (columns of `X`, or passed as separate vectors). Generalizes
+[`rotary_ridge_properties`](@ref) beyond its `N=2` rotary/elliptical special
+case to arbitrary `N`, using jLab's genuinely N-general joint-amplitude/
+frequency machinery (power-weighted averages and Euclidean vector norms
+across channels -- no cross-channel covariance/tensor terms; see
+[`instmom`](@ref) for the same idea applied to instantaneous moments
+directly).
+
+Unlike the rotary path, there is no notion of rotation "sense" for `N > 2`
+independent channels, so no `xi`/`sense` fields are returned -- only the
+joint amplitude/frequency and the ridge-based signal estimate itself.
+
+# Returns
+`Vector{NamedTuple}`, one per ridge, sorted by start time, with fields:
+- `start`, `stop`, `npoints`: ridge extent (time-index bookkeeping)
+- `L`: ridge length in cycles (`Σ|omega|/(2π)`)
+- `omega_bar`: kappa²-weighted mean joint instantaneous frequency (rad/sample)
+- `kappa_bar`: kappa²-weighted RMS joint amplitude (Euclidean-norm convention,
+  `sqrt(Σ_n|w_n|^2)`, matching `isridgepoint.m` -- NOT `instmom`'s RMS
+  convention, which differs by `sqrt(N)`; see [`instmom`](@ref)'s docstring)
+- `wt_ridge::Matrix{ComplexF64}` (`npoints × n_channels`): the wavelet
+  transform vector along the ridge -- the ridge-based estimate of the
+  analytic joint oscillation (paper Eq. 40, `x̂₊(t) = w_x,ψ(t, ŝ(t))`)
+
+# References
+Lilly, J. M. & Olhede, S. C. (2012). Analysis of modulated multivariate
+oscillations. IEEE Trans. Signal Process., 60(2), 600-612.
+jRidges/ridgewalk.m, isridgepoint.m, instmom.m.
+"""
+function multivariate_ridges(X::AbstractMatrix{<:Real};
+                             dt::Real=1.0,
+                             fs::Union{AbstractVector, Nothing}=nothing,
+                             nv::Int=8,
+                             gamma::Real=3.0,
+                             beta::Real=2.0,
+                             boundary::Symbol=:zeros,
+                             min_cycles::Real=2 * sqrt(beta * gamma) / π,
+                             alpha::Real=0.25,
+                             abs_floor::Real=0.0)
+    n_ch = size(X, 2)
+    n_ch >= 2 || error("multivariate_ridges requires at least 2 channels (columns of X)")
+
+    wt3, fs_out = wavetrans(X; dt=dt, fs=fs, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
+
+    mag = sqrt.(dropdims(sum(abs2, wt3; dims=3); dims=3))   # joint amplitude, Euclidean-norm convention (isridgepoint.m)
+    om_joint, dfdt_joint = _instfreq_joint_nd(wt3, 1.0)
+    mag_c = complex.(mag)  # ridgechains_jlab only ever reads abs.(w); embedding as complex satisfies its type
+
+    events = ridgechains_jlab(mag_c, fs_out; alpha=alpha, min_cycles=min_cycles, dt=1.0,
+                              abs_floor=abs_floor, om=om_joint, dfdt=dfdt_joint)
+
+    ridges = NamedTuple[]
+    for e in events
+        times = collect(e.times)
+        n = length(times)
+
+        # Sub-bin interpolation of the raw complex transform itself (real/imag
+        # parts separately), via the same quadinterp fit ridgechains_jlab used
+        # for amplitude/frequency (ridgeinterp.m's "interpolate any other
+        # ridge quantity the same way") -- here applied directly to the
+        # transform, since wt_ridge (the ridge-based signal estimate, Eq. 40)
+        # IS the deliverable of multivariate ridge analysis.
+        wt_ridge = Matrix{ComplexF64}(undef, n, n_ch)
+        k2 = Vector{Float64}(undef, n)
+        for k in 1:n
+            t, j, je = times[k], e.jcenter[k], e.jfrac[k]
+            for c in 1:n_ch
+                if je == j
+                    wt_ridge[k, c] = wt3[t, j, c]
+                else
+                    re = quadinterp(j - 1, j, j + 1, real(wt3[t, j-1, c]), real(wt3[t, j, c]), real(wt3[t, j+1, c]), je)
+                    imv = quadinterp(j - 1, j, j + 1, imag(wt3[t, j-1, c]), imag(wt3[t, j, c]), imag(wt3[t, j+1, c]), je)
+                    wt_ridge[k, c] = complex(re, imv)
+                end
+            end
+            k2[k] = sum(abs2, @view(wt_ridge[k, :]))
+        end
+        sk2 = sum(k2)
+        sk2 > 0 || continue
+
+        omega = e.freq   # rad/sample, jLab-style phase-derived (ridgechains_jlab)
+        L = sum(abs.(omega)) / (2π)
+        L > min_cycles || continue
+
+        omega_bar = sum(k2 .* omega) / sk2
+        kappa_bar = sqrt(sk2 / n)
+
+        push!(ridges, (start=times[1], stop=times[end], npoints=n,
+                       L=L, omega_bar=omega_bar, kappa_bar=kappa_bar,
+                       wt_ridge=wt_ridge))
+    end
+
+    sort!(ridges; by=r -> r.start)
+    return ridges
+end
+
+function multivariate_ridges(x1::AbstractVector{<:Real}, x2::AbstractVector{<:Real},
+                             xs::AbstractVector{<:Real}...; kwargs...)
+    multivariate_ridges(hcat(x1, x2, xs...); kwargs...)
 end
 
 # ============================================================================

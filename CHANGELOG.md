@@ -37,6 +37,35 @@ follows [Keep a Changelog](https://keepachangelog.com/).
   established tolerance (exact at low/mid frequencies; a known
   pre-existing near-Nyquist filter-tail difference bounds the highest
   frequencies at ~2e-4 relative near record edges).
+- **Multivariate instantaneous moments**: `instmom` — jLab-faithful
+  univariate moments (`a`, `om`, `upsilon`, and the previously-missing
+  `xi`/curvature, `Types`-free bundled entry point over the same math as
+  `tiredecode`'s kinds) plus a genuinely N-general **joint** form,
+  `instmom(W::AbstractArray{<:Complex,3})`, porting jLab's `jointmom`
+  power-weighted-average formulas (Lilly & Olhede 2012, Eq. 13 and
+  Sect. III.D) exactly — confirmed by reading `jRidges/instmom.m` directly
+  (including its Bell-polynomial-based curvature derivation, algebraically
+  reduced and checked to match this port's closed-form `xi` formula) and
+  verified against real jLab MATLAB output to ≤2.3e-14 relative on
+  `ja`/`jomega`/`jupsilon` and ≤8.9e-12 on `jxi`
+  (`scripts/jlab_crosscheck_multivariate.{jl,m}`). `tiredecode` gains a
+  `kind="curvature"` option (complex-valued, both the 2-D and N-D methods).
+- **Multivariate wavelet ridge analysis**: `multivariate_ridges` extracts a
+  modulated oscillation common to `N ≥ 2` simultaneously observed real
+  channels, generalizing `rotary_ridge_properties` beyond its `N=2`
+  rotary/elliptical special case. Reuses the existing channel-agnostic
+  `ridgechains_jlab` chaining engine unchanged; the new math is the joint
+  amplitude (`√(Σₙ|wₙ|²)`, `isridgepoint.m`'s Euclidean-norm convention)
+  and joint frequency (new `_instfreq_joint_nd`, the direct N-channel
+  generalization of the existing bivariate `_instfreq_joint` — proven to
+  agree with it to floating-point precision on the `N=2` case). No
+  `xi`/`sense` fields (no rotation-sense concept exists for `N>2`
+  independent channels); instead returns `omega_bar`, `kappa_bar`, and
+  `wt_ridge` (the ridge-based estimate of the analytic joint oscillation,
+  paper Eq. 40). Note: `instmom`'s own joint-amplitude convention is RMS
+  (`√(meanₙ|wₙ|²)`), differing from `multivariate_ridges`'s Euclidean-sum
+  convention by `√N` — this mirrors a genuine convention difference between
+  jLab's own two use sites, not an inconsistency in this port.
 
 ### Fixed
 
