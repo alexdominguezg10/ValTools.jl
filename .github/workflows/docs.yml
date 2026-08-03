@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
     paths:
       - 'docs/**'
       - 'examples/**'
@@ -22,19 +21,41 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # Allow pushing docs back to repo
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git operations
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
+
       - name: Install dependencies
         run: |
           julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
       - name: Build documentation
         run: |
           julia --project=docs docs/make.jl
-      - name: Upload built docs
+
+      - name: Commit and push docs (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Check if docs/build has changes
+          if [ -n "$(git status --porcelain docs/build)" ]; then
+            git add docs/build/
+            git commit -m "Auto-deploy gallery: $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push origin main
+          else
+            echo "No changes to docs/build"
+          fi
+
+      - name: Upload built docs (PR only)
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: documentation
