@@ -10,8 +10,19 @@
 # Usage (from /LUSTRE/adomingu/ValTools.jl, in a CUDA+Multitaper-equipped
 # env, e.g. the valtools_gpu_scratch_env pattern):
 #   julia --project=<env> scripts/verify_gpu_wavetrans_nd.jl
+#
+# NOTE: Multitaper must be loaded even though nothing below calls it.
+# ValToolsCUDAExt is declared in Project.toml as triggered by BOTH CUDA
+# and Multitaper (`ValToolsCUDAExt = ["CUDA", "Multitaper"]` -- shared
+# with the spectral_multitaper_gpu path in the same extension file), so
+# `using CUDA` alone never activates it: _wavetrans_nd_gpu silently falls
+# through to the error-stub in src/JLab/wavelets.jl instead of dispatching
+# to the real GPU method. Same category of gotcha as the GOMED-era `ext/`
+# sync miss (project_gomed_validation_results memory) -- a weakdep
+# extension trigger not firing, not a logic bug in the code it gates.
 
 using CUDA
+using Multitaper  # required to activate ValToolsCUDAExt -- see note above
 using ValTools.JLab
 
 @assert CUDA.functional() "CUDA not functional on this node"
