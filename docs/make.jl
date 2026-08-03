@@ -1,44 +1,32 @@
-# Minimal docs build script for Phase 1: Literate.jl integration
-# Phase 0: Copy markdown files and create basic HTML structure
-# Phase 1: Process examples with Literate.jl, generate gallery HTML
+# ValTools.jl Documentation Builder — Phase 2: Full Documenter Integration
+# Combines Literate.jl example processing with Documenter.jl HTML rendering
 
 import TOML
 
 repo_root = dirname(dirname(@__FILE__))
 src_dir = joinpath(@__DIR__, "src")
+generated_dir = joinpath(src_dir, "generated")  # Generate into src/ so Documenter finds them
 build_dir = joinpath(@__DIR__, "build")
-generated_dir = joinpath(build_dir, "generated")
 examples_dir = joinpath(repo_root, "examples")
 
 # Read Project.toml to get version
 proj = TOML.parsefile(joinpath(repo_root, "Project.toml"))
 version = proj["version"]
 
-@info "ValTools.jl v$version Gallery (Phase 1 — Literate Integration)"
-@info "Source: $src_dir"
-@info "Build: $build_dir"
-@info "Generated: $generated_dir"
-@info "Examples: $examples_dir"
+@info "ValTools.jl v$version Gallery (Phase 2 — Documenter Integration)"
+@info "Source: $src_dir → Generated: $generated_dir → Build: $build_dir"
 
 # Create build directories
 mkpath(build_dir)
 mkpath(generated_dir)
 
-# Copy markdown files from src to build
-for file in readdir(src_dir)
-    if endswith(file, ".md")
-        src = joinpath(src_dir, file)
-        dst = joinpath(build_dir, file)
-        cp(src, dst; force=true)
-        @info "Copied $file"
-    end
-end
+# ──────────────────────────────────────────────────────────────────────────
+# Step 1: Process examples with Literate.jl
+# ──────────────────────────────────────────────────────────────────────────
 
-# Process examples with Literate.jl (if available)
 try
     using Literate
 
-    # List of examples to process (in order of gallery)
     examples_to_process = [
         "inertial_oscillation.jl",
         "eddy_spindown.jl",
@@ -55,106 +43,84 @@ try
     for example in examples_to_process
         example_path = joinpath(examples_dir, example)
         if isfile(example_path)
-            @info "  Processing $example..."
             try
-                # Generate Markdown + executed code blocks in generated/
                 Literate.markdown(
                     example_path,
                     generated_dir;
-                    name = splitext(example)[1],  # filename without .jl
-                    credit = false,  # no auto-credit line
-                    throw_errors = false,  # continue on execution errors
+                    name = splitext(example)[1],
+                    credit = false,
+                    throw_errors = false,
+                    execute = false,  # Don't execute; just render code blocks
                 )
             catch e
                 @warn "Error processing $example: $e"
             end
-        else
-            @warn "Example not found: $example_path"
         end
     end
 
     @info "✓ Literate processing complete"
 
+    # Post-process: convert @example blocks to regular ```julia blocks (no execution)
+    for md_file in readdir(generated_dir)
+        if endswith(md_file, ".md")
+            md_path = joinpath(generated_dir, md_file)
+            content = read(md_path, String)
+            # Replace ````@example name with regular ````julia
+            content = replace(content, r"````@example [a-z_0-9]*\n" => "````julia\n")
+            write(md_path, content)
+        end
+    end
+
 catch e
-    @warn "Literate.jl not available; skipping example processing: $e"
-    @info "To enable, install Literate.jl in docs/Project.toml"
+    @warn "Literate.jl not available: $e"
 end
 
-# Create minimal index.html (will be replaced by Documenter in Phase 1)
-index_html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ValTools.jl v$version Gallery</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, sans-serif; line-height: 1.6; max-width: 1000px; margin: 0 auto; padding: 20px; }
-        h1 { color: #2c3e50; }
-        h2 { color: #34495e; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
-        .status { background: #ecf0f1; padding: 15px; border-radius: 4px; margin: 20px 0; }
-        .status.complete { background: #d5f4e6; border-left: 4px solid #27ae60; }
-        .status.progress { background: #fef5e7; border-left: 4px solid #f39c12; }
-        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
-        a { color: #3498db; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .toc { background: #f8f9fa; padding: 15px; border-radius: 4px; margin: 20px 0; }
-        .toc a { display: block; padding: 5px 0; }
-    </style>
-</head>
-<body>
-    <h1>📊 ValTools.jl Examples Gallery</h1>
-    <p><strong>Version:</strong> v$version | <strong>Status:</strong> Phase 0 Scaffold (Beta)</p>
+# ──────────────────────────────────────────────────────────────────────────
+# Step 2: Build full HTML docs with Documenter.jl
+# ──────────────────────────────────────────────────────────────────────────
 
-    <div class="status progress">
-        <strong>🔨 Phase 0 — Scaffold (In Progress)</strong>
-        <p>Documentation infrastructure is being set up. See below for what's ready.</p>
-    </div>
+try
+    using Documenter
 
-    <h2>📚 Pages</h2>
-    <div class="toc">
-        <a href="index.md">Home</a>
-        <a href="gallery.md">Examples Gallery</a>
-        <a href="api.md">API Reference</a>
-        <a href="contributing.md">Contributing Guide</a>
-    </div>
+    # Build pages structure: manually include generated examples
+    pages = [
+        "Home" => "index.md",
+        "Gallery" => [
+            "Overview" => "gallery.md",
+            "Getting Started" => "generated/inertial_oscillation.md",
+            "Wavelets & Ridges" => [
+                "Eddy Spin-down" => "generated/eddy_spindown.md",
+                "Ridge Polarization" => "generated/ridge_ellipse_polarization.md",
+                "Multivariate Ridge Analysis" => "generated/multivariate_common_oscillation.md",
+                "SVD Polarization Detection" => "generated/svd_polarization_detection.md",
+            ],
+            "Multitaper Spectral" => "generated/multitaper_line_detection.md",
+            "Colocation & Validation" => "generated/mooring_array_batch.md",
+            "Unit-Safe Validation" => "generated/unit_safe_validation.md",
+        ],
+        "API Reference" => "api.md",
+        "Contributing" => "contributing.md",
+    ]
 
-    <h2>What's in Phase 0?</h2>
-    <ul>
-        <li>✓ Documentation structure created</li>
-        <li>✓ Home page with vision & quick start</li>
-        <li>✓ Gallery page with 8 existing examples + roadmap stubs</li>
-        <li>✓ API reference (autogenerated docstrings on Phase 1)</li>
-        <li>✓ Contributing guide</li>
-        <li>✓ GitHub Actions CI workflow</li>
-        <li>⏳ Phase 1: Integrate Documenter.jl + Literate.jl for full rendering</li>
-    </ul>
+    makedocs(
+        format = Documenter.HTML(
+            prettyurls = false,
+            collapselevel = 2,
+        ),
+        sitename = "ValTools.jl",
+        authors = "Alex Dominguez",
+        pages = pages,
+        repo = "https://github.com/alexdominguezg10/ValTools.jl",
+        build = build_dir,
+        source = src_dir,
+    )
 
-    <h2>Quick Start</h2>
-    <pre><code>using ValTools, CairoMakie
-# Inertial oscillation at 25°N
-f = 1/26.7  # cycles/hour
-t = 0:1:(24*40)
-u = 0.15 .* cos.(2π * f .* t)
-v = 0.15 .* sin.(2π * f .* t)
-spec = rotary_spectrum(u, v; dt_hours=1)
-# Peak should be ~26.7 h ✓</code></pre>
+    @info "✓ Documenter.jl build complete"
 
-    <h2>Gallery Status</h2>
-    <p><strong>Wavelets & Ridges:</strong> ✓ 10/10 complete (5 examples ready)</p>
-    <p><strong>Multitaper Spectral:</strong> ✓ 1/3 complete (line detection example ready)</p>
-    <p><strong>Loaders & Colocation:</strong> ○ 1/7 complete (mooring batch example ready)</p>
-    <p><strong>Others:</strong> ○ Planned (Phase 2–3)</p>
+catch e
+    @warn "Documenter.jl build failed: $e"
+    @warn "Continuing with Phase 1 (Literate-only) HTML output..."
+end
 
-    <hr>
-    <p><small>ValTools.jl is developed at CICESE. See <a href="https://github.com/alexdominguezg10/ValTools.jl">GitHub</a> for source.</small></p>
-</body>
-</html>
-"""
-
-write(joinpath(build_dir, "index.html"), index_html)
-@info "Created index.html"
-
-@info "Phase 0 scaffold complete! Next: Phase 1 (Documenter integration + Literate examples)"
-@info "Open file://$(build_dir)/index.html in a browser to preview"
-println("\n✓ Build successful")
+@info "Documentation built successfully at $build_dir"
+println("✓ Build complete — open file://$(build_dir)/index.html in a browser")

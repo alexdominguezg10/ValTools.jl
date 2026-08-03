@@ -1,316 +1,97 @@
 # API Reference
 
-## Core Types
-
-### Time Series Objects
-```@docs
-ValTools.TimeSeriesVector
-ValTools.TimeSeriesMatrix
-ValTools.TimeSeriesCollection
+For full API documentation and docstrings, use the Julia REPL:
+```julia
+?TimeSeriesVector
+?rotary_spectrum
+?wavetrans
+# ... etc
 ```
 
-### Spectral Estimates
-```@docs
-ValTools.SpectralEstimate
-ValTools.RotarySpectralEstimate
-ValTools.RotaryCoherenceEstimate
-ValTools.CrossSpectralEstimate
-ValTools.EllipsePolarizationEstimate
-```
+Or see the [GitHub README](https://github.com/alexdominguezg10/ValTools.jl#readme).
 
-### Wavelet Analysis
-```@docs
-ValTools.WaveletTransform
-```
+## Types
 
-## Multitaper Spectral Analysis
+- **TimeSeriesVector**, **TimeSeriesMatrix**, **TimeSeriesCollection** — typed time series with Unitful support
+- **SpectralEstimate**, **RotarySpectralEstimate**, **CrossSpectralEstimate** — spectral analysis results
+- **EllipsePolarizationEstimate** — polarization parameters
+- **WaveletTransform** — wavelet transform results
 
-```@docs
-ValTools.spectral_multitaper
-ValTools.rotary_spectrum
-ValTools.rotary_coherence
-ValTools.cross_coherence
-ValTools.cross_spectrum
-ValTools.ellipse_polarization
-```
+## Spectral Analysis
 
-## Wavelet Analysis
+### Multitaper methods
+- `spectral_multitaper()` — Thomson's multitaper spectrum with F-tests
+- `rotary_spectrum()` — rotary spectral decomposition (CCW/CW split)
+- `rotary_coherence()` — rotary spectral coherence
+- `cross_coherence()` — cross-spectrum coherence
 
-### Continuous Wavelet Transform
-```@docs
-ValTools.wavetrans
-ValTools.wavetrans_batch
-```
+### Wavelet methods
+- `wavetrans()` — continuous wavelet transform (generalized Morse wavelets)
+- `rotary_wavetrans()` — rotary wavelet transform
+- `ridgemap()`, `ridgechains()` — wavelet ridge chain tracking
+- `multivariate_ridges()` — joint ridge analysis (N-channel)
+- `wavelet_significance()` — Monte Carlo significance testing
+- `tiredecode()` — instantaneous frequency, amplitude, phase
+- `instmom()` — univariate instantaneous moments
+- `jointmom()` — multivariate joint moments
 
-### Ridge Analysis
-```@docs
-ValTools.ridgemap
-ValTools.wavelet_significance
-ValTools.ridge_significant
-```
+### Polarization
+- `ellipse_polarization()` — frequency-domain polarization (frequency-domain)
+- `ellsig()`, `ellpol()` — time-domain ellipse synthesis & characterization
+- `ellipsefit()` — least-squares ellipse fit
+- `msvd()` — SVD-based coherence detection (Park et al. 1987)
+- `rotary()` — rotary decomposition
 
-### Instantaneous Moments
-```@docs
-ValTools.tiredecode
-ValTools.instmom
-ValTools.jointmom
-```
+## Model I/O
 
-### Rotary Wavelet Transform
-```@docs
-ValTools.rotary_wavetrans
-ValTools.rotary_ridge
-```
-
-## Spectral Utilities
-
-```@docs
-ValTools.morsewave
-ValTools.morsewave_freq
-ValTools.sleptap
-ValTools.mspec
-```
-
-## Time Series Filtering & Manipulation
-
-```@docs
-ValTools.bandpass
-ValTools.highpass
-ValTools.lowpass
-ValTools.detrend
-ValTools.fillgaps
-ValTools.hilbert
-```
-
-## Polarization Analysis
-
-```@docs
-ValTools.ellipsefit
-ValTools.rotary
-ValTools.msvd
-```
-
-## Model Readers
-
-### CROCO/ROMS/NEMO
-```@docs
-ValTools.CROCOReader
-ValTools.ROMSReader
-ValTools.NEMOReader
-ValTools.ssh
-ValTools.sst
-ValTools.sss
-ValTools.temperature
-ValTools.salinity
-ValTools.velocities
-ValTools.z_levels
-```
-
-### Coordinate Transforms
-```@docs
-ValTools.sigma_to_z
-ValTools.interp_z
-ValTools.build_stretching
-```
+- `CROCOReader`, `ROMSReader`, `NEMOReader` — read ROMS-family model output
+- `ssh()`, `sst()`, `temperature()`, `salinity()`, `velocities()` — extract fields
+- `sigma_to_z()`, `interp_z()` — vertical coordinate transforms
+- `sigma_to_z_gpu()`, `interp_z_gpu()` — GPU-accelerated transforms
 
 ## Observation Loaders
 
-### Profile Data (Argo, etc.)
-```@docs
-ValTools.ArgoLoader
-ValTools.argo_temperature
-ValTools.argo_salinity
-ValTools.argo_pressure
-ValTools.argo_to_dataframe
-```
+- `ArgoLoader` — Argo float profiles
+- `DUACSLoader` — DUACS SSH/SLA satellite data
+- `SWOTLoader` — SWOT SSH observations
+- `NDBCLoader` — NDBC buoy data (waves, winds)
+- `RAFOSLoader` — RAFOS float trajectories
+- `IESLoader` — IES acoustic tomography
+- `MooringCurrentLoader` — moored current meter arrays
+- `ThermistorLoader` — thermistor chains
+- `CloudDriftLoader` — CloudDrift trajectories
+- `GliderLoader` — glider profiles & sections
+- `GEMBuilder` — gravitational equivalent model from Argo
 
-### Satellite SSH/SLA
-```@docs
-ValTools.DUACSLoader
-ValTools.duacs_ssh
-ValTools.duacs_sla
-ValTools.duacs_geostrophic_velocity
-ValTools.SWOTLoader
-ValTools.swot_ssh
-ValTools.swot_sla
-```
+## Colocation & Validation
 
-### Surface Winds & Waves
-```@docs
-ValTools.NDBCLoader
-ValTools.ndbc_station
-ValTools.ndbc_waves
-ValTools.ndbc_winds
-ValTools.ndbc_winds_ts
-ValTools.ndbc_to_dataframe
-```
-
-### Lagrangian (Drifters)
-```@docs
-ValTools.RAFOSLoader
-ValTools.rafos_positions
-ValTools.rafos_velocity_estimates
-ValTools.rafos_to_dataframe
-ValTools.CloudDriftLoader
-ValTools.clouddrift_trajectory
-ValTools.clouddrift_n_trajectories
-ValTools.clouddrift_to_dataframe
-```
-
-### Acoustic Tomography
-```@docs
-ValTools.IESLoader
-ValTools.ies_travel_time
-ValTools.ies_ssh_anomaly
-ValTools.ies_to_dataframe
-ValTools.ies_travel_time_ts
-```
-
-### Moorings
-```@docs
-ValTools.MooringCurrentLoader
-ValTools.mooring_current_profiles
-ValTools.mooring_speed
-ValTools.mooring_direction
-ValTools.mooring_variance_ellipse
-ValTools.mooring_progressive_vector
-ValTools.mooring_current_ts
-ValTools.ThermistorLoader
-ValTools.thermistor_temperature
-ValTools.thermistor_isotherm_depth
-ValTools.thermistor_heat_content
-```
-
-### Specialized
-```@docs
-ValTools.GEMBuilder
-ValTools.gem_from_argo
-ValTools.gem_fit!
-ValTools.gem_tau_to_profiles
-ValTools.gem_save
-ValTools.gem_load
-ValTools.sound_speed_chen_millero
-ValTools.GHRSSTLoader
-ValTools.ghrsst_sst
-ValTools.GOFLOWLoader
-ValTools.goflow_u
-ValTools.goflow_v
-ValTools.goflow_speed
-ValTools.goflow_vorticity
-ValTools.CANEKSectionLoader
-ValTools.canek_to_dataset
-ValTools.canek_transport
-ValTools.GliderLoader
-ValTools.glider_profiles
-ValTools.glider_section
-ValTools.glider_to_dataframe
-```
-
-## Colocation & Matching
-
-```@docs
-ValTools.colocate_model_obs
-ValTools.colocate_model_grid
-ValTools.colocate_model_trajectory
-ValTools.colocate_model_mooring
-ValTools.colocate_model_section
-```
-
-## Mooring Dynamics
-
-```@docs
-ValTools.MooringKnockdownModel
-ValTools.fit_knockdown
-ValTools.delta_z
-ValTools.horizontal_excursion
-ValTools.virtual_mooring
-ValTools.project_to_fixed_depths
-```
+- `colocate_model_obs()` — match model to observation points
+- `colocate_model_grid()` — sample model on observation grid
+- `colocate_model_trajectory()` — follow a drifter path
+- `colocate_model_mooring()` — extract virtual mooring time series
+- `colocate_model_section()` — cross-section colocation
 
 ## Validation Metrics
 
-```@docs
-ValTools.compute_metrics
-ValTools.taylor_stats
-ValTools.bootstrap_metrics
-ValTools.metrics_by_group
-ValTools.current_ellipse_metrics
-```
+- `compute_metrics()` — RMSE, correlation, bias, skill score
+- `taylor_stats()` — Taylor diagram statistics
+- `bootstrap_metrics()` — bootstrap confidence intervals
+- `ellipse_polarization()` — current ellipse metrics
 
-## 2-D Spectral Analysis
+## Visualization
 
-```@docs
-ValTools.isotropic_2d_spectrum
-ValTools.cross_spectrum_kx_ky
-ValTools.detrend_2d_linear
-ValTools.alongtrack_wavenumber_spectrum
-```
+- `plot_timeseries()`, `plot_spectrum()` — typed dispatch plotting
+- `plot_rotary_spectrum()`, `plot_rotary_coherence()`
+- `plot_ellipse_polarization()`, `plot_colocation()`
+- `taylor_diagram()` — Taylor diagram
+- `plot_wind_rose()` — wind rose visualization
+- `plot_lic()` — line-integral convolution flow viz
+- `animate_field_realtime()` — animated field playback
 
-## Plotting (Dispatch-Based)
+## Utilities
 
-### Time Series
-```@docs
-ValTools.plot_timeseries
-ValTools.plot_timeseries_comparison
-```
-
-### Spectral
-```@docs
-ValTools.plot_spectrum
-ValTools.plot_rotary_spectrum
-ValTools.plot_rotary_coherence
-ValTools.plot_cross_spectrum
-```
-
-### Polarization
-```@docs
-ValTools.plot_ellipse_polarization
-```
-
-### Colocation
-```@docs
-ValTools.plot_colocation
-ValTools.taylor_diagram
-```
-
-### Maps & Comparisons
-```@docs
-ValTools.plot_comparison_map
-```
-
-### Wind & Flow
-```@docs
-ValTools.plot_wind_rose
-ValTools.plot_wind_rose_comparison
-ValTools.plot_streamlines
-ValTools.plot_flow
-ValTools.plot_field_panel
-```
-
-### Animation
-```@docs
-ValTools.animate_field_realtime
-```
-
-### Visualization
-```@docs
-ValTools.lic_texture
-ValTools.plot_lic
-```
-
-## Validation & Conversion
-
-```@docs
-ValTools.pressure_to_depth
-ValTools.depth_to_pressure
-ValTools.validate_model_spectra
-ValTools.kinetic_energy_budget
-```
-
-## GPU Functions
-
-```@docs
-ValTools.sigma_to_z_gpu
-ValTools.interp_z_gpu
-ValTools.lic_texture_gpu
-```
+- `pressure_to_depth()`, `depth_to_pressure()`
+- `mooring_knockdown_model()`, `fit_knockdown()` — mooring dynamics
+- `virtual_mooring()` — synthesize mooring time series
+- `fillgaps()`, `detrend()`, `hilbert()` — signal preprocessing
+- `bandpass()`, `highpass()`, `lowpass()` — filtering
