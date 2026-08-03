@@ -901,6 +901,77 @@ line_peak = argmin(spec.ftest_pval)   # smallest p-value = the real line
 # lands exactly on the true frequency, even when the raw power peak doesn't
 ```
 
+### [A common oscillation across a mooring: multivariate ridge analysis](examples/multivariate_common_oscillation.jl)
+
+Three current meters at different depths on one mooring all feel the same
+near-inertial wave, just with different (depth-decaying) amplitude.
+Analyzing each depth separately throws away the fact that they share one
+signal. `multivariate_ridges` (Lilly & Olhede 2012) instead finds ONE joint
+ridge across all `N` channels at once — jLab's genuinely `N`-general
+wavelet ridge analysis, not a per-channel loop.
+
+![Three depths sharing one oscillation, and the recovered amplitude-vs-depth profile](examples/multivariate_common_oscillation.png)
+
+```julia
+ridges = multivariate_ridges(X; dt=1.0, nv=8)   # X: (N, 3) — three depths, one call
+r = only(ridges)
+# r.wt_ridge reconstructs each depth's amplitude, matching the true decay profile
+```
+
+### [Batching a mooring array through one wavelet transform](examples/mooring_array_batch.jl)
+
+`wavetrans` accepts any array with time along dimension 1 and independent
+signals along the trailing dimensions (jLab's own column-signal
+convention), so an entire 8-depth mooring array goes through a single
+batched FFT call instead of a loop — one transform, one amplitude-vs-depth
+profile.
+
+![8-depth mooring array and its batched amplitude-vs-depth profile](examples/mooring_array_batch.png)
+
+```julia
+wt, fs = wavetrans(X; dt=1.0, nv=8)     # X: (N, 8) — one batched call, not 8
+amp = tiredecode(wt, fs; kind="amp")    # (N, n_freq, 8), still fully batched
+```
+
+### [Detecting a coherent signal with SVD-based polarization (msvd)](examples/svd_polarization_detection.jl)
+
+`msvd` (Park, Vernon & Lindberg 1987) singular-value-decomposes each
+frequency band's raw `channels × looks` matrix directly, before any
+pooling — giving the fraction of a band's power explained by a single
+rank-1 structure, `d₁²/trace(S)`. A genuinely coherent bivariate
+oscillation sits near 1; independent noise sits near its asymptotic 0.5 —
+a clean signal-detection statistic the pooled `ellipse_polarization` route
+doesn't give.
+
+![MSVD rank-1 power fraction spiking sharply at the true signal frequency](examples/svd_polarization_detection.png)
+
+```julia
+r = msvd(W)                                # W: (bands, channels, looks)
+explained = r.d[:, 1].^2 ./ r.trS          # sharp peak at the true signal frequency
+```
+
+### [Synthesizing and characterizing a modulated ellipse (ellpol/ellsig)](examples/ridge_ellipse_polarization.jl)
+
+`ellipse_polarization` characterizes polarization in the frequency domain.
+`ellsig`/`ellpol` take the complementary time-domain route: given a wavelet
+ridge's time-varying ellipse parameters (RMS amplitude, linearity,
+orientation, orbital phase), `ellsig` reconstructs the actual signal and
+`ellpol` summarizes it with one polarization state, satisfying the
+identity `P² = alpha² + beta²` for any consistent decomposition.
+
+![A precessing, breathing ellipse and its true time-varying parameters](examples/ridge_ellipse_polarization.png)
+
+```julia
+x, y = ellsig(kappa, lambda, theta, phi)   # synthesize the signal from known ellipse params
+r = ellpol(kappa, lambda, theta, phi)
+# r.P^2 ≈ r.alpha^2 + r.beta^2 exactly, as it must for any consistent decomposition
+```
+
+*A strongly modulated ellipse (orientation sweeping a half-turn) gives a
+low time-averaged `P`* — not a bug, but `ellpol` correctly reporting that
+one fixed polarization state is a poor summary of a signal whose character
+changes a lot over the record; see the script for the full explanation.
+
 ---
 
 *ValTools.jl v0.1.0 — A. Dominguez, CICESE, 2026*

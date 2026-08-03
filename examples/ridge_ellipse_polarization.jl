@@ -12,9 +12,21 @@
 # We build a slowly-precessing, slowly-more-eccentric ellipse by hand — the
 # kind of signature a wavelet ridge would hand back for a real eddy whose
 # orientation drifts and whose shape isn't perfectly circular — synthesize
-# it with `ellsig`, and check that `ellpol` recovers sensible time-averaged
-# numbers, including the identity `P² = alpha² + beta²` that has to hold
-# for any consistent polarization decomposition.
+# it with `ellsig`, and check the identity `P² = alpha² + beta²` that has to
+# hold for any consistent polarization decomposition.
+#
+# One thing worth noticing before running this: `ellpol` reports ONE
+# time-averaged polarization state for the whole record. A single
+# instantaneous ellipse is always fully polarized (P=1) in this sense — but
+# here the orientation sweeps a full half-turn over the record. Averaging
+# the second-moment matrix across many different orientations partially
+# cancels itself out, the same way averaging many unit vectors pointing in
+# different directions gives something shorter than a unit vector. So `P`
+# well below 1 here isn't a discrepancy — it's `ellpol` correctly reporting
+# that "one fixed polarization state" is a poor summary of a *strongly
+# modulated* signal, exactly the situation Lilly & Olhede's own modulation
+# framework (used elsewhere in this package for `instmom`/
+# `multivariate_ridges`) is built to quantify.
 
 using ValTools.JLab, CairoMakie
 
@@ -30,7 +42,8 @@ x, y = ellsig(kappa, lambda, theta, phi)
 r = ellpol(kappa, lambda, theta, phi)
 
 println("Time-averaged polarization state:")
-println("  P (total polarization):        ", round(r.P, digits=3))
+println("  P (total polarization):        ", round(r.P, digits=3),
+        "  (well below 1: orientation sweeps a half-turn, see header note)")
 println("  alpha (rotary excess, CCW-CW):  ", round(r.alpha, digits=3))
 println("  beta (linear-motion component): ", round(r.beta, digits=3))
 println("  Identity check  P^2 vs alpha^2+beta^2:  ",
