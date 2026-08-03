@@ -27,6 +27,10 @@
 # modulated* signal, exactly the situation Lilly & Olhede's own modulation
 # framework (used elsewhere in this package for `instmom`/
 # `multivariate_ridges`) is built to quantify.
+#
+# **Reference:** Lilly & Olhede (2009); jLab: `jEllipse/ellpol.m`, `jEllipse/ellsig.m`
+
+# ## Setup: synthesize a precessing, breathing ellipse
 
 using ValTools.JLab, CairoMakie
 
@@ -38,17 +42,28 @@ lambda = 0.15 .+ 0.35 .* sin.(2π .* t ./ N) # linearity drifts: more circular <
 theta  = 2π .* t ./ (2 * N)                 # orientation precesses half a turn over the record
 phi    = 2π .* 0.05 .* t                    # orbital phase -- sets the rotation rate
 
+# ## Synthesize and characterize
+
 x, y = ellsig(kappa, lambda, theta, phi)
 r = ellpol(kappa, lambda, theta, phi)
 
+P_val = r.P
+alpha_val = r.alpha
+beta_val = r.beta
+identity_lhs = r.P^2
+identity_rhs = r.alpha^2 + r.beta^2
+kbar_val = r.kbar
+
 println("Time-averaged polarization state:")
-println("  P (total polarization):        ", round(r.P, digits=3),
+println("  P (total polarization):        ", round(P_val, digits=3),
         "  (well below 1: orientation sweeps a half-turn, see header note)")
-println("  alpha (rotary excess, CCW-CW):  ", round(r.alpha, digits=3))
-println("  beta (linear-motion component): ", round(r.beta, digits=3))
+println("  alpha (rotary excess, CCW-CW):  ", round(alpha_val, digits=3))
+println("  beta (linear-motion component): ", round(beta_val, digits=3))
 println("  Identity check  P^2 vs alpha^2+beta^2:  ",
-        round(r.P^2, digits=6), "  vs  ", round(r.alpha^2 + r.beta^2, digits=6))
-println("  kbar (mean RMS axis length):     ", round(r.kbar, digits=3))
+        round(identity_lhs, digits=6), "  vs  ", round(identity_rhs, digits=6))
+println("  kbar (mean RMS axis length):     ", round(kbar_val, digits=3))
+
+# ## Visualization: ellipse trajectory and parameter time series
 
 fig = Figure(size=(900, 400))
 
@@ -66,3 +81,12 @@ axislegend(ax2, position=:lt)
 
 save(joinpath(@__DIR__, "ridge_ellipse_polarization.png"), fig)
 println("Saved ridge_ellipse_polarization.png")
+
+# ## Verification
+
+# The fundamental identity P² = alpha² + beta² must hold exactly for any consistent decomposition
+identity_error = abs(identity_lhs - identity_rhs)
+@assert identity_error < 1e-10 "Identity P² = alpha² + beta² violated"
+@assert P_val < 0.8 "P should be <0.8 for strongly modulated signal (orientation sweep)"
+@assert kbar_val ≈ 1.0 "kbar should be ~1.0 (constant amplitude)"
+println("✓ Verification passed: identity P² = alpha² + beta² holds to numerical precision")

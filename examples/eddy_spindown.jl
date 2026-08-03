@@ -9,6 +9,10 @@
 #
 # We simulate an anticyclonic eddy's rotary velocity, amplitude decaying
 # exponentially over ~8 days, and ask `rotary_ridge` to recover the decay.
+#
+# **Reference:** Lilly & Olhede (2012) ridge analysis; jLab: `jRidges/ridgemap.m`, `jRidges/ridgechains.m`
+
+# ## Setup: simulate a decaying eddy
 
 using ValTools.JLab, Statistics, CairoMakie
 
@@ -22,13 +26,21 @@ envelope = 0.3 .* exp.(-t ./ decay_hours)
 u = envelope .* cos.(2π * f0 .* t)
 v = envelope .* sin.(2π * f0 .* t)   # CCW
 
+# ## Track the ridge: instantaneous amplitude and frequency
+
 result = rotary_ridge(u, v; dt=dt, nv=8)
 
+amp_day1 = mean(filter(!isnan, result.amp_ccw[1:24]))
+amp_day10 = mean(filter(!isnan, result.amp_ccw[end-23:end]))
+rotary_coeff_mean = mean(filter(!isnan, result.rotary_coefficient))
+
 println("CCW ridge amplitude, day 1 vs day 10: ",
-        round(mean(filter(!isnan, result.amp_ccw[1:24])), digits=3), " -> ",
-        round(mean(filter(!isnan, result.amp_ccw[end-23:end])), digits=3))
+        round(amp_day1, digits=3), " -> ",
+        round(amp_day10, digits=3))
 println("Mean rotary coefficient: ",
-        round(mean(filter(!isnan, result.rotary_coefficient)), digits=2), "  (+1 = purely CCW)")
+        round(rotary_coeff_mean, digits=2), "  (+1 = purely CCW)")
+
+# ## Visualization: tracked amplitude and period
 
 fig = Figure(size=(900, 400))
 
@@ -45,3 +57,10 @@ hlines!(ax2, [20.0], color=:gray, linestyle=:dash)
 
 save(joinpath(@__DIR__, "eddy_spindown.png"), fig)
 println("Saved eddy_spindown.png")
+
+# ## Verification
+
+@assert amp_day10 < amp_day1 "Amplitude should decay over time"
+@assert amp_day1 / amp_day10 > 2 "Amplitude should decay by >2× over 10 days"
+@assert rotary_coeff_mean > 0.95 "Rotary coefficient should be >0.95 for pure CCW eddy"
+println("✓ Verification passed: decay observed, CCW rotation confirmed")

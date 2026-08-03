@@ -22,6 +22,10 @@
 # polarized oscillation in independent per-channel noise and ask `msvd` to
 # find the frequency band where the signal actually lives, purely from how
 # "rank-1" that band's structure is.
+#
+# **Reference:** Park et al. (1987); jLab: `jSpectral/msvd.m`
+
+# ## Setup: circularly polarized signal + independent noise
 
 using ValTools.Metrics, FFTW, Statistics, CairoMakie, Random
 Random.seed!(5)
@@ -33,6 +37,8 @@ dt = 1.0
 f0 = 0.08                      # cycles/sample -- the true signal frequency
 u = 0.4 .* cos.(2π * f0 .* (0:n-1)) .+ 0.5 .* randn(n)
 v = 0.4 .* sin.(2π * f0 .* (0:n-1)) .+ 0.5 .* randn(n)   # circularly polarized (CCW) + noise
+
+# ## Segmented spectral estimation with Hann windowing
 
 hann = 0.5 .- 0.5 .* cos.(2π .* (0:ns-1) ./ (ns - 1))
 
@@ -54,17 +60,24 @@ for k in 1:K
     W[:, 2, k] = fft(v[seg] .* hann)[pos]
 end
 
+# ## MSVD: rank-1 power fraction (coherence detection statistic)
+
 r = msvd(W)
 explained = r.d[:, 1] .^ 2 ./ r.trS   # fraction of power in the dominant (rank-1) mode
 
 peak = argmax(explained)
 noise_bands = abs.(freqs_pos .- f0) .> 0.05
+peak_explained = explained[peak]
+noise_mean_explained = mean(explained[noise_bands])
+
 println("Peak explained-power frequency: ", round(freqs_pos[peak], digits=4),
         "  (true: ", f0, ")")
-println("Explained fraction at the signal band: ", round(explained[peak], digits=3),
+println("Explained fraction at the signal band: ", round(peak_explained, digits=3),
         "  (1.0 = fully coherent/rank-1)")
-println("Mean explained fraction elsewhere:     ", round(mean(explained[noise_bands]), digits=3),
+println("Mean explained fraction elsewhere:     ", round(noise_mean_explained, digits=3),
         "  (asymptotic limit for independent noise is 0.5; finite K=$K biases this up)")
+
+# ## Visualization: rank-1 power fraction vs. frequency
 
 fig = Figure(size=(600, 400))
 ax = Axis(fig[1, 1], xlabel="Frequency (cycles/sample)",
@@ -78,3 +91,10 @@ axislegend(ax)
 
 save(joinpath(@__DIR__, "svd_polarization_detection.png"), fig)
 println("Saved svd_polarization_detection.png")
+
+# ## Verification
+
+@assert abs(freqs_pos[peak] - f0) < 0.005 "Peak should be within 0.005 of true frequency"
+@assert peak_explained > 0.8 "Signal coherence should be high (>0.8)"
+@assert noise_mean_explained < 0.7 "Noise floor should stay below 0.7 (finite-K bias)"
+println("✓ Verification passed: signal detected at correct frequency with high coherence")

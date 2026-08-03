@@ -11,6 +11,10 @@
 #
 # Here we simulate forty days of hourly current-meter data at 25°N (inertial
 # period ≈ 26.7 h), buried in noise, and ask `rotary_spectrum` to find it.
+#
+# **Reference:** Gonella (1972); jLab implementation: `jRotary/rotary.m`
+
+# ## Setup: simulate inertial oscillations
 
 using ValTools, Multitaper, CairoMakie, Random
 Random.seed!(1)
@@ -22,12 +26,23 @@ f_inertial = 1 / 26.7       # cycles/hour at 25°N
 u = 0.15 .* cos.(2π * f_inertial .* t) .+ 0.03 .* randn(length(t))
 v = 0.15 .* sin.(2π * f_inertial .* t) .+ 0.03 .* randn(length(t))  # CCW = inertial (NH)
 
+# ## Decompose into rotary modes
+#
+# The `rotary_spectrum` function splits velocity into positive-frequency
+# (counter-clockwise, inertial) and negative-frequency (clockwise, tidal)
+# components, showing which rotation sense dominates.
+
 spec = rotary_spectrum(u, v; dt_hours=dt)
 
 peak = argmax(spec.S_ccw)
-println("Peak CCW period:     ", round(1 / spec.freq[peak], digits=1), " h  (true: 26.7 h)")
-println("Rotary coefficient:  ", round(spec.rotary_coefficient[peak], digits=2), "  (+1 = purely CCW/inertial, -1 = purely CW)")
+recovered_period = 1 / spec.freq[peak]
+rotary_coeff = spec.rotary_coefficient[peak]
 
+println("Peak CCW period:     ", round(recovered_period, digits=1), " h  (true: 26.7 h)")
+println("Rotary coefficient:  ", round(rotary_coeff, digits=2), "  (+1 = purely CCW/inertial, -1 = purely CW)")
+
+# ## Visualization: hodograph and rotary spectrum
+#
 # Two views of the same signal: the hodograph shows the velocity vector
 # literally spiraling counter-clockwise over time, and the rotary spectrum
 # shows *why* — almost all the energy sits in the CCW branch at 26.7 h.
@@ -50,3 +65,11 @@ axislegend(ax2)
 
 save(joinpath(@__DIR__, "inertial_oscillation.png"), fig)
 println("Saved inertial_oscillation.png")
+
+# ## Verification
+#
+# Check that the recovered inertial period matches the true value within 1%.
+
+@assert abs(recovered_period - 26.7) / 26.7 < 0.01 "Recovered period deviates >1% from true 26.7 h"
+@assert rotary_coeff > 0.9 "Rotary coefficient should be >0.9 for pure CCW inertial oscillation"
+println("✓ Verification passed: recovered inertial period within 1%, rotary coefficient >0.9")

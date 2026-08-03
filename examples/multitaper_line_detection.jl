@@ -13,6 +13,10 @@
 # `spectral_multitaper` to find it. The fun part: the raw power spectrum's
 # highest bin isn't quite at 0.02 — sampling noise nudges it one bin over.
 # The F-test isn't fooled.
+#
+# **Reference:** Thomson (1982); jLab: `jSpectral/spectral_multitaper.m`
+
+# ## Setup: signal + noise with known frequency
 
 using ValTools.JLab, Multitaper, Unitful, CairoMakie, Random
 Random.seed!(7)
@@ -20,15 +24,21 @@ Random.seed!(7)
 N = 2000
 x = 0.5 .* sin.(2π * 0.02 .* (1:N)) .+ randn(N)  # m/s: signal + noise
 
+# ## Multitaper estimation with F-test for line components
+
 spec = spectral_multitaper(x, 1.0; nw=4.0, unit=u"m/s")
 
 power_peak = argmax(spec.power)
 line_peak  = argmin(spec.ftest_pval)   # smallest p-value = most significant line
 
-println("Raw power peak:  freq=", round(spec.freq[power_peak], digits=4),
+power_freq = spec.freq[power_peak]
+line_freq = spec.freq[line_peak]
+line_pval = spec.ftest_pval[line_peak]
+
+println("Raw power peak:  freq=", round(power_freq, digits=4),
         "   F-test p-value there: ", round(spec.ftest_pval[power_peak], digits=4))
-println("F-test line peak: freq=", round(spec.freq[line_peak], digits=4),
-        "   p-value: ", round(spec.ftest_pval[line_peak], digits=6),
+println("F-test line peak: freq=", round(line_freq, digits=4),
+        "   p-value: ", round(line_pval, digits=6),
         "  (true frequency: 0.02)")
 println()
 println(power_peak == line_peak ?
@@ -36,14 +46,22 @@ println(power_peak == line_peak ?
     "This run: the power spectrum's highest bin is off by one from the true line — " *
     "the F-test correctly lands on 0.02 anyway.")
 
+# ## Visualization: multitaper power spectrum with F-test line
+
 fig = Figure(size=(600, 400))
 ax = Axis(fig[1, 1], xlabel="Frequency (cycles/sample)", ylabel="Power (m²/s²)",
           title="Multitaper spectrum, nw=4, K=$(spec.params.ntapers) tapers", yscale=log10)
 lines!(ax, spec.freq, Unitful.ustrip.(spec.power), color=:dodgerblue, linewidth=1.5)
-vlines!(ax, [spec.freq[line_peak]], color=:seagreen, linestyle=:dash, linewidth=2,
-        label="F-test line (p=$(round(spec.ftest_pval[line_peak], digits=4)))")
+vlines!(ax, [line_freq], color=:seagreen, linestyle=:dash, linewidth=2,
+        label="F-test line (p=$(round(line_pval, digits=4)))")
 xlims!(ax, 0, 0.1)
 axislegend(ax)
 
 save(joinpath(@__DIR__, "multitaper_spectrum.png"), fig)
 println("Saved multitaper_spectrum.png")
+
+# ## Verification
+
+@assert abs(line_freq - 0.02) < 0.001 "Detected line should be within 0.001 of true 0.02"
+@assert line_pval < 0.001 "F-test p-value should be highly significant (<0.001)"
+println("✓ Verification passed: line detected at correct frequency with p<0.001")

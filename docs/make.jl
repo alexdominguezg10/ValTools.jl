@@ -1,25 +1,28 @@
-# Minimal docs build script for Phase 0 scaffold
+# Minimal docs build script for Phase 1: Literate.jl integration
 # Phase 0: Copy markdown files and create basic HTML structure
-# (Phase 1 will integrate Documenter.jl once registry/deps settle)
+# Phase 1: Process examples with Literate.jl, generate gallery HTML
 
 import TOML
 
 repo_root = dirname(dirname(@__FILE__))
 src_dir = joinpath(@__DIR__, "src")
 build_dir = joinpath(@__DIR__, "build")
+generated_dir = joinpath(build_dir, "generated")
 examples_dir = joinpath(repo_root, "examples")
 
 # Read Project.toml to get version
 proj = TOML.parsefile(joinpath(repo_root, "Project.toml"))
 version = proj["version"]
 
-@info "ValTools.jl v$version Gallery Scaffold (Phase 0)"
+@info "ValTools.jl v$version Gallery (Phase 1 — Literate Integration)"
 @info "Source: $src_dir"
 @info "Build: $build_dir"
+@info "Generated: $generated_dir"
 @info "Examples: $examples_dir"
 
-# Create build directory
+# Create build directories
 mkpath(build_dir)
+mkpath(generated_dir)
 
 # Copy markdown files from src to build
 for file in readdir(src_dir)
@@ -29,6 +32,52 @@ for file in readdir(src_dir)
         cp(src, dst; force=true)
         @info "Copied $file"
     end
+end
+
+# Process examples with Literate.jl (if available)
+try
+    using Literate
+
+    # List of examples to process (in order of gallery)
+    examples_to_process = [
+        "inertial_oscillation.jl",
+        "eddy_spindown.jl",
+        "ridge_ellipse_polarization.jl",
+        "multivariate_common_oscillation.jl",
+        "svd_polarization_detection.jl",
+        "multitaper_line_detection.jl",
+        "mooring_array_batch.jl",
+        "unit_safe_validation.jl",
+    ]
+
+    @info "Processing $(length(examples_to_process)) examples with Literate.jl..."
+
+    for example in examples_to_process
+        example_path = joinpath(examples_dir, example)
+        if isfile(example_path)
+            @info "  Processing $example..."
+            try
+                # Generate Markdown + executed code blocks in generated/
+                Literate.markdown(
+                    example_path,
+                    generated_dir;
+                    name = splitext(example)[1],  # filename without .jl
+                    credit = false,  # no auto-credit line
+                    throw_errors = false,  # continue on execution errors
+                )
+            catch e
+                @warn "Error processing $example: $e"
+            end
+        else
+            @warn "Example not found: $example_path"
+        end
+    end
+
+    @info "✓ Literate processing complete"
+
+catch e
+    @warn "Literate.jl not available; skipping example processing: $e"
+    @info "To enable, install Literate.jl in docs/Project.toml"
 end
 
 # Create minimal index.html (will be replaced by Documenter in Phase 1)

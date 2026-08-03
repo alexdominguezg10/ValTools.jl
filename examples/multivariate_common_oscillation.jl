@@ -13,6 +13,10 @@
 # oscillation with amplitude decaying with depth, ask `multivariate_ridges`
 # to recover it, and check that the ridge's reconstructed transform
 # (`wt_ridge`) picks the true depth-decay profile back out.
+#
+# **Reference:** Lilly & Olhede (2012); jLab: `jRidges/multivariate_ridges.m`
+
+# ## Setup: three depths sharing one oscillation
 
 using ValTools.JLab, Statistics, CairoMakie, Random
 Random.seed!(3)
@@ -29,18 +33,24 @@ phase_lag = [0.0, 0.25, 0.55]     # radians, small lag increasing with depth
 X = hcat([true_amp[k] .* cos.(2π * f0 .* t .+ phase_lag[k]) .+ 0.02 .* randn(N)
           for k in eachindex(depths)]...)
 
+# ## Find joint ridge across all three channels
+
 ridges = multivariate_ridges(X; dt=dt, nv=8)
 r = only(ridges)   # one clean ridge spans the whole record
 
 amp_recovered = vec(mean(abs.(r.wt_ridge); dims=1))
 amp_recovered ./= amp_recovered[1] / true_amp[1]   # scale to the surface (50 m) amplitude
 
-println("Joint ridge period:    ", round(2π / r.omega_bar, digits=2), " h  (true: 18.5 h)")
+joint_period = 2π / r.omega_bar
+
+println("Joint ridge period:    ", round(joint_period, digits=2), " h  (true: 18.5 h)")
 println("Depth   true amp   recovered amp")
 for k in eachindex(depths)
     println("  ", Int(depths[k]), " m   ", round(true_amp[k], digits=3),
             "      ", round(amp_recovered[k], digits=3))
 end
+
+# ## Visualization: raw records and recovered amplitude profile
 
 # One ridge, three channels: the left panel shows all three raw records
 # together (same oscillation, shrinking with depth); the right panel
@@ -68,3 +78,10 @@ axislegend(ax2)
 
 save(joinpath(@__DIR__, "multivariate_common_oscillation.png"), fig)
 println("Saved multivariate_common_oscillation.png")
+
+# ## Verification
+
+@assert abs(joint_period - 18.5) / 18.5 < 0.02 "Joint period should match true 18.5 h within 2%"
+rms_amp_error = sqrt(mean((amp_recovered .- true_amp) .^ 2))
+@assert rms_amp_error < 0.03 "RMS error in amplitude profile should be <0.03 m/s"
+println("✓ Verification passed: period matched within 2%, amplitude profile RMS error < 0.03 m/s")

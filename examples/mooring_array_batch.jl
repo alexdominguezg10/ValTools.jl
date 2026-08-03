@@ -14,6 +14,10 @@
 # it's locally reinforced (a stratification/mode-shape effect), batch them
 # through one `wavetrans` call, and read off the amplitude-vs-depth profile
 # directly from the 3-D output.
+#
+# **Reference:** jLab N-D wavelet support: `jRidges/wavetrans.m` (trailing-dims batching)
+
+# ## Setup: simulate 8-depth mooring array
 
 using ValTools.JLab, Statistics, CairoMakie, Random
 Random.seed!(11)
@@ -32,6 +36,8 @@ true_amp = 0.10 .+ 0.15 .* abs.(sin.(2π .* depths ./ 260.0))
 X = hcat([true_amp[k] .* cos.(2π * f_tide .* t) .+ 0.015 .* randn(N)
           for k in eachindex(depths)]...)
 
+# ## Batched wavelet transform: one call for all 8 depths
+
 wt, fs = wavetrans(X; dt=dt, nv=8)    # (N, n_freq, 8) in ONE batched FFT call
 amp = tiredecode(wt, fs; kind="amp")  # (N, n_freq, 8), still fully batched
 
@@ -46,6 +52,8 @@ for k in eachindex(depths)
     println("  ", round(depths[k], digits=0), "        ", round(true_amp[k], digits=3),
             "      ", round(amp_by_depth[k], digits=3))
 end
+
+# ## Visualization: time series and recovered amplitude profile
 
 fig = Figure(size=(900, 400))
 
@@ -65,3 +73,10 @@ axislegend(ax2, position=:rb)
 
 save(joinpath(@__DIR__, "mooring_array_batch.png"), fig)
 println("Saved mooring_array_batch.png")
+
+# ## Verification
+
+# Check that batched recovery matches the true amplitude profile to within ~15%
+rms_error = sqrt(mean((amp_by_depth .- true_amp) .^ 2))
+@assert rms_error < 0.04 "RMS error in amplitude profile should be <0.04 m/s"
+println("✓ Verification passed: amplitude profile recovered within RMS error = $rms_error m/s")
