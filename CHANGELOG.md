@@ -3,6 +3,52 @@
 All notable changes to ValTools.jl are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **N-dimensional wavelet support** (jLab trailing-dims semantics —
+  Flare Table 1's "N-dimensional support" wavelet void): `wavetrans` now
+  accepts any array with time along dimension 1 and independent signals
+  along trailing dimensions, returning `(N, n_freqs, trailing...)` from a
+  single batched FFT pass; `rotary_wavetrans` likewise. New jLab-style
+  multi-input form `wavetrans(x, y, z)` (one shared frequency grid, tuple
+  of per-input transforms — `spheretrans.m`'s `[wx,wy,wz]=wavetrans(x,y,z)`),
+  now used internally by `rotary_wavetrans_sphere`. `tiredecode` applies
+  over trailing dims; ridge functions (`ridgemap`, `ridgechains`,
+  `ridgechains_jlab`, `transmax`) get explicit N-D guards with per-signal
+  guidance instead of `MethodError`s. `wavelet_significance` batches all
+  noise surrogates through one N-D transform (was `n_surrogates`
+  sequential calls; identical output for a fixed RNG seed) and gains a
+  `gpu` kwarg. Complex-valued `wavetrans` input now genuinely works (was
+  broken by an internal `Float64` collect despite the code implying
+  support).
+- **Typed wavelet API**: new `Types.WaveletTransform` struct; `wavetrans`
+  methods on `TimeSeriesVector`/`TimeSeriesMatrix` (dt derived from the
+  time axis, units recorded in `params.unit`) and on
+  `TimeSeriesCollection` (ragged records → `Vector{WaveletTransform}`);
+  `tiredecode(::WaveletTransform)` re-applies the source unit to
+  amplitudes. `Types._dt_hours_from_time` hoisted from
+  ValToolsMultitaperExt to Types for shared use.
+- **MATLAB cross-check harness** `scripts/jlab_crosscheck_wavetrans_nd.jl`
+  (+ `.m`): verifies against real jLab that (a) jLab's matrix path equals
+  its per-column path (diff 0.0), (b) our N-D path equals our scalar path
+  (≤5e-16), (c) our output matches jLab within the scalar port's
+  established tolerance (exact at low/mid frequencies; a known
+  pre-existing near-Nyquist filter-tail difference bounds the highest
+  frequencies at ~2e-4 relative near record edges).
+
+### Fixed
+
+- `wavetrans(x; boundary=:mirror, gpu=true)` returned the wrong `N`
+  samples (the first mirrored block instead of the middle — the boundary
+  offset was never passed to the GPU path).
+- `wavetrans_batch` ignored `boundary` entirely (no kwarg existed); it is
+  now a thin wrapper over the N-D `wavetrans` and honors it.
+- The `wavetrans(::CuVector)` auto-detect override silently dropped the
+  `fs` and `boundary` kwargs; it now forwards all kwargs (and covers any
+  `CuArray` rank).
+
 ## [0.2.0] — 2026-07-31
 
 First documented release since the type-hierarchy redesign. Covers the

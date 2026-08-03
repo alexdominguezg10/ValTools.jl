@@ -354,3 +354,56 @@ struct ColocatedObservation
     metrics::NamedTuple
 end
 
+"""
+    WaveletTransform{Q<:Number, N}
+
+Continuous wavelet transform result, as produced by the typed
+[`wavetrans`](@ref) methods on [`TimeSeriesVector`](@ref) /
+[`TimeSeriesMatrix`](@ref).
+
+`wt`'s first two dimensions are `(time, frequency)`; any trailing
+dimensions index independent signals (channels), matching jLab's
+column-signal convention. Unlike the value-carrying containers, `wt` is
+stored as plain complex coefficients — the input's physical unit is kept
+in `params.unit` and re-applied by `tiredecode(W; kind="amp")`, since the
+complex coefficients themselves feed unit-agnostic ridge machinery
+(`ridgemap`, `ridgechains`, ...) directly via `W.wt`.
+
+# Fields
+- `wt`: complex wavelet coefficients `(N_time, n_freqs, channels...)`
+- `fs`: analysis frequencies in rad/sample
+- `time`: the source series' time axis, or `nothing` for plain-array input
+- `channels`: trailing-dimension channel names (empty for a single signal)
+- `params`: free-form `NamedTuple` of transform parameters
+  (`dt_hours`, `unit`, `gamma`, `beta`, `boundary`, ...)
+"""
+struct WaveletTransform{Q<:Number, N}
+    wt::Array{Q, N}
+    fs::Vector{Float64}
+    time::Union{Vector{DateTime}, Nothing}
+    channels::Vector{String}
+    params::NamedTuple
+end
+
+# Derive a uniform sampling interval (in hours) from timestamps, shared by
+# every typed estimator entry point (rotary_spectrum, cross_coherence,
+# ellipse_polarization in ValToolsMultitaperExt; wavetrans in JLab).
+# Spectral and wavelet estimation both assume uniform sampling — silently
+# using e.g. the mean dt of an irregular series would produce a result with
+# no fixed physical meaning, so irregular sampling is a hard error here,
+# not a warning or a silent average. (Hoisted from
+# ValToolsMultitaperExt/rotary_spectrum.jl, 2026-08-03, when the JLab typed
+# wavelet methods became a second consumer.)
+function _dt_hours_from_time(time::AbstractVector{<:Dates.AbstractDateTime}; rtol::Real=1e-3)
+    length(time) >= 2 || error("need at least 2 timestamps to derive a sampling interval")
+    dts_ms = Float64.(Dates.value.(diff(time)))  # milliseconds
+    dt0 = dts_ms[1]
+    dt0 > 0 || error("non-increasing timestamps -- time must be sorted and strictly increasing")
+    maxdev = maximum(abs.(dts_ms .- dt0)) / dt0
+    maxdev <= rtol || error("irregularly sampled time axis (max relative deviation in " *
+                             "sampling interval = $(round(maxdev * 100, digits=2))%, tolerance = " *
+                             "$(rtol * 100)%) -- spectral/wavelet estimation assumes uniform " *
+                             "sampling; resample onto a regular grid first")
+    return dt0 / (1000.0 * 3600.0)  # ms -> hours
+end
+

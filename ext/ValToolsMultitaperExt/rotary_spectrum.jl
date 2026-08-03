@@ -91,24 +91,9 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
                                         rotary_coefficient, ftest_ccw, ftest_cw, params)
 end
 
-# Derive a uniform sampling interval (in hours) from timestamps, for the
-# TimeSeriesVector-based typed methods (rotary_spectrum, cross_coherence,
-# ellipse_polarization). Multitaper spectral estimation assumes uniform
-# sampling -- silently using e.g. the mean dt of an irregular series would
-# produce a spectrum with no fixed physical meaning, so irregular sampling
-# is a hard error here, not a warning or a silent average.
-function _dt_hours_from_time(time::AbstractVector{<:Dates.AbstractDateTime}; rtol::Real=1e-3)
-    length(time) >= 2 || error("need at least 2 timestamps to derive a sampling interval")
-    dts_ms = Float64.(Dates.value.(diff(time)))  # milliseconds
-    dt0 = dts_ms[1]
-    dt0 > 0 || error("non-increasing timestamps -- time must be sorted and strictly increasing")
-    maxdev = maximum(abs.(dts_ms .- dt0)) / dt0
-    maxdev <= rtol || error("irregularly sampled time axis (max relative deviation in " *
-                             "sampling interval = $(round(maxdev * 100, digits=2))%, tolerance = " *
-                             "$(rtol * 100)%) -- multitaper spectral estimation assumes uniform " *
-                             "sampling; resample onto a regular grid first")
-    return dt0 / (1000.0 * 3600.0)  # ms -> hours
-end
+# The `_dt_hours_from_time` helper the typed methods below use was hoisted
+# to Types (src/Types/types_def.jl) when JLab's typed wavetrans methods
+# became a second consumer -- imported at the top of this extension.
 
 """
     rotary_spectrum(u::Types.TimeSeriesVector, v::Types.TimeSeriesVector; kwargs...)

@@ -34,9 +34,11 @@ using ValTools.JLab
 # Single signal — GPU wavelet transform
 wt, scales = wavetrans(x; dt=dt, nv=8, gpu=true)
 
-# Batch of signals — the GPU sweet spot (10–50× speedup on H200)
-# X is (N, n_signals) — e.g., velocity at 100 mooring depths
-wt3d, scales = wavetrans_batch(X; dt=dt, nv=8, gpu=true)
+# Batch of signals — the GPU sweet spot (10–50× speedup on H200).
+# wavetrans is N-D (jLab column-signal convention): dim 1 is time, any
+# trailing dims are independent signals — e.g., velocity at 100 mooring
+# depths as an (N, 100) matrix, or (N, depths, moorings) rank-3.
+wt3d, scales = wavetrans(X; dt=dt, nv=8, gpu=true)
 
 # Or pass a CuArray directly — GPU path auto-detected
 wt, scales = wavetrans(CuArray(x); dt=dt, nv=8)
@@ -108,7 +110,10 @@ and acknowledge the jLab toolbox. See ATTRIBUTION.md for exact citations.
 module JLab
 
 using LinearAlgebra, Statistics, FFTW, SpecialFunctions, Random
+import Unitful
+import Dates
 using ..Metrics
+using ..Types
 
 # Include submodules
 include("wavelets.jl")

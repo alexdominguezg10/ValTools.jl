@@ -5,4 +5,5 @@ using Test
     include("test_dispatch.jl")
     include("test_unitful_ops.jl")
     include("test_spectral_estimate.jl")
+    include("test_wavelet_types.jl")
 end

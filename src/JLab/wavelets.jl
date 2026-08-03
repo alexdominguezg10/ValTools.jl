@@ -258,8 +258,9 @@ end
 # ============================================================================
 
 """
-    wavetrans(x::AbstractVector; dt=1.0, fs=nothing, nv=8,
-              mother="morse", gamma=3.0, beta=8.0, gpu=false)
+    wavetrans(X::AbstractArray{<:Number}; dt=1.0, fs=nothing, nv=8,
+              mother="morse", gamma=3.0, beta=8.0, gpu=false, boundary=:zeros)
+    wavetrans(x, y, zs...; kwargs...)
 
 Continuous wavelet transform using generalized Morse wavelets,
 calibrated to match jLab's wavetrans.m.
@@ -270,23 +271,39 @@ Key differences from a naive CWT:
 - Frequencies auto-generated via morsespace (log-spaced, proper cutoffs)
 - Linear detrend applied by default
 
+Dimension 1 of `X` is time; any trailing dimensions index independent
+signals, following jLab's column-signal convention (`wavetrans.m` on a
+matrix transforms each column). A vector input returns a `(N, n_freqs)`
+matrix as before; an `(N, d2, d3, ...)` array returns
+`(N, n_freqs, d2, d3, ...)`, every signal sharing one frequency grid and
+one batched FFT. Complex-valued input is transformed as-is (no factor of
+2), isolating its positive-rotary content — this is what
+[`rotary_wavetrans`](@ref) builds on.
+
+The multi-argument form `wavetrans(x, y, z)` mirrors jLab's
+`[wx,wy,wz]=wavetrans(x,y,z,...)` (see `spheretrans.m`): all inputs must
+have identical size and all-real or all-complex element type; they are
+transformed in a single batched call sharing one frequency grid, and the
+per-input transforms are returned as a tuple, with `fs` last.
+
 # Arguments
-- `x`: Input time series
+- `X`: Input time series (time along dimension 1)
 - `dt`: Sampling interval (default 1.0)
 - `fs`: Analysis frequencies in rad/sample (auto via morsespace if nothing)
 - `nv`: Voices per octave (used only if fs=nothing; mapped to density)
 - `mother`: "morse" (default)
 - `gamma`, `beta`: Morse wavelet parameters (default 3.0, 8.0)
 - `gpu`: Use GPU (default false)
+- `boundary`: `:zeros` (default) or `:mirror` (see `_boundary_pad`)
 
 # Returns
-- `wt::Matrix{ComplexF64}`: Wavelet coefficients `(N, n_freqs)`
+- `wt::Array{ComplexF64}`: Wavelet coefficients `(N, n_freqs, trailing dims...)`
 - `fs::Vector{Float64}`: Analysis frequencies (rad/sample)
 
 # References
 Lilly & Olhede (2009); jWavelet/wavetrans.m
 """
-function wavetrans(x::AbstractVector;
+function wavetrans(X::AbstractArray{<:Number};
                    dt::Real=1.0,
                    fs::Union{AbstractVector, Nothing}=nothing,
                    scales::Union{AbstractVector, Nothing}=nothing,
@@ -297,45 +314,79 @@ function wavetrans(x::AbstractVector;
                    gpu::Bool=false,
                    boundary::Symbol=:zeros)
 
-    xv = collect(Float64, x)
-    N  = length(xv)
+    N = size(X, 1)
     (N < 1) && error("Input must have at least 1 sample")
+    trailing = size(X)[2:end]
+    n_sig = prod(trailing)
 
     g = Float64(gamma)
     b = Float64(beta)
 
-    # Linear detrend (jLab default)
-    xv = _detrend_signal(xv)
+    # Flatten trailing signal dims to columns; keep real input real so the
+    # forward FFT and the one-sided factor-of-2 convention below apply.
+    T = eltype(X) <: Real ? Float64 : ComplexF64
+    Xm = Matrix{T}(reshape(X, N, n_sig))
 
-    # Generate analysis frequencies
-    if fs === nothing && scales === nothing
-        P, _, _ = morseprops(g, b)
-        density = max(1, round(Int, nv * P / 4))
-        fs = morsespace(g, b, N; density=density)
-    elseif scales !== nothing
-        # Backward compatibility: convert scales to radian frequencies
-        fs = 2π .* collect(Float64, scales) .* dt
-    end
-    fs = collect(Float64, fs)
+    # Linear detrend (jLab default), all columns at once
+    Xm = _detrend_signal(Xm)
 
-    x_pad, N_fft, offset = _boundary_pad(xv, N, boundary)
+    fs_v = _resolve_freq_grid(N, g, b, nv, fs, scales, dt)
+
+    X_pad, N_fft, offset = _boundary_pad(Xm, N, boundary)
 
     # Build filter bank (calibrated Morse wavelet)
-    bank = _build_filter_bank(N_fft, fs, g, b)
+    bank = _build_filter_bank(N_fft, fs_v, g, b)
 
     # Dispatch
     if gpu
-        wt = _wavetrans_gpu(x_pad, bank, N, N_fft, length(fs))
+        wt3 = _wavetrans_nd_gpu(X_pad, bank, N, offset)
     else
-        wt = _wavetrans_cpu(x_pad, bank, N, N_fft, length(fs); offset=offset)
+        wt3 = _wavetrans_nd_cpu(X_pad, bank, N, offset)
     end
 
     # Factor of 2 for real-valued input (jLab convention)
-    if eltype(x) <: Real
-        wt .*= 2
+    if eltype(X) <: Real
+        wt3 .*= 2
     end
 
-    return wt, fs
+    wt = reshape(wt3, N, length(fs_v), trailing...)
+    return wt, fs_v
+end
+
+# jLab multi-input form: [wx,wy,wz] = wavetrans(x,y,z,...) — one batched
+# transform, one shared frequency grid, per-input outputs returned as a
+# tuple with fs last (spheretrans.m:76 is the canonical jLab call site).
+function wavetrans(x::AbstractArray{<:Number}, y::AbstractArray{<:Number},
+                   rest::AbstractArray{<:Number}...; kwargs...)
+    inputs = (x, y, rest...)
+    sz = size(x)
+    all(size(a) == sz for a in inputs) ||
+        error("wavetrans: all inputs must have identical size (got $(map(size, inputs)))")
+    # Mixing real and complex inputs would silently change the real inputs'
+    # scaling (the one-sided ×2 convention applies only to all-real batches)
+    all(a -> eltype(a) <: Real, inputs) || all(a -> eltype(a) <: Complex, inputs) ||
+        error("wavetrans: inputs must be all-real or all-complex, not mixed")
+    stacked = cat(inputs...; dims=ndims(x) + 1)
+    wt, fs_v = wavetrans(stacked; kwargs...)
+    nd = ndims(wt)
+    outs = ntuple(k -> copy(selectdim(wt, nd, k)), length(inputs))
+    return (outs..., fs_v)
+end
+
+# Shared frequency-grid resolution (same precedence as always: an explicit
+# `scales=` wins for backward compatibility, then `fs=`, then morsespace).
+function _resolve_freq_grid(N::Int, g::Float64, b::Float64, nv::Int,
+                            fs::Union{AbstractVector, Nothing},
+                            scales::Union{AbstractVector, Nothing}, dt::Real)
+    if fs === nothing && scales === nothing
+        P, _, _ = morseprops(g, b)
+        density = max(1, round(Int, nv * P / 4))
+        return morsespace(g, b, N; density=density)
+    elseif scales !== nothing
+        # Backward compatibility: convert scales to radian frequencies
+        return 2π .* collect(Float64, scales) .* dt
+    end
+    return collect(Float64, fs)
 end
 
 # Boundary-condition padding before the wavelet FFT (timeseries_boundary.m).
@@ -351,44 +402,52 @@ end
 # 'periodic' -- so :mirror is the one to use for eddy-ridge-faithful
 # analysis; :zeros stays the default here for backward compatibility with
 # every other caller in this file.
-function _boundary_pad(xv::Vector{Float64}, N::Int, boundary::Symbol)
+# Columns are independent signals; padding acts along dimension 1 only.
+function _boundary_pad(X::AbstractMatrix{T}, N::Int, boundary::Symbol) where {T<:Union{Float64, ComplexF64}}
     if boundary === :zeros
         N_fft = 2^ceil(Int, log2(2*N - 1))
-        return vcat(xv, zeros(N_fft - N)), N_fft, 0
+        return vcat(X, zeros(T, N_fft - N, size(X, 2))), N_fft, 0
     elseif boundary === :mirror
-        x_pad = vcat(reverse(xv), xv, reverse(xv))
-        return x_pad, 3N, N
+        return vcat(reverse(X; dims=1), X, reverse(X; dims=1)), 3N, N
     else
         error("boundary must be :zeros or :mirror, got $boundary")
     end
 end
 
-function _detrend_signal(x::Vector{Float64})
-    n = length(x)
-    n < 2 && return x
+# Least squares against a real [1 t] design matrix; for complex input this
+# decouples into independent detrends of the real and imaginary parts, so
+# the rotary u+iv path detrends identically to detrending u and v separately.
+function _detrend_signal(X::AbstractVecOrMat{T}) where {T<:Union{Float64, ComplexF64}}
+    n = size(X, 1)
+    n < 2 && return X
     t = collect(1.0:n)
     A = [ones(n) t]
-    coeffs = A \ x
-    return x .- A * coeffs
+    return X .- A * (A \ X)
 end
 
 # ── CPU path ────────────────────────────────────────────────────────────────
 
-function _wavetrans_cpu(x_pad::Vector{<:Number}, bank::Matrix{Float64},
-                        N::Int, N_fft::Int, n_scales::Int; offset::Int=0)
-    X  = fft(x_pad)
-    wt = zeros(ComplexF64, N, n_scales)
+# One forward FFT for every signal at once, then a scale loop broadcasting
+# each filter across all signal columns — memory stays O(N_fft × n_sig) per
+# step regardless of how many scales there are.
+function _wavetrans_nd_cpu(X_pad::AbstractMatrix{<:Number}, bank::Matrix{Float64},
+                           N::Int, offset::Int)
+    Xf = fft(X_pad, 1)
+    n_scales = size(bank, 2)
+    n_sig = size(X_pad, 2)
+    wt = Array{ComplexF64, 3}(undef, N, n_scales, n_sig)
 
     for j in 1:n_scales
-        Y = X .* conj.(@view(bank[:, j]))      # conj(ψ̂) · X̂ (jLab convention)
-        wt[:, j] .= ifft(Y)[offset+1:offset+N]
+        Y = Xf .* conj.(@view(bank[:, j]))     # conj(ψ̂) · X̂ (jLab convention)
+        Yt = ifft(Y, 1)
+        @views wt[:, j, :] .= Yt[offset+1:offset+N, :]
     end
     return wt
 end
 
 # ── GPU path (stub — implemented by ValToolsCUDAExt) ────────────────────────
 
-function _wavetrans_gpu(x_pad, bank, N, N_fft, n_scales)
+function _wavetrans_nd_gpu(X_pad, bank, N, offset)
     error("""GPU wavelet transform requires CUDA.jl.
     Load it first:  `using CUDA`
     Then call:       `wavetrans(x; gpu=true)`""")
@@ -412,12 +471,14 @@ transforming `conj(w) = u - iv` with the *same* wavelet bank isolates the
 clockwise (negative-frequency) content — no separate CW filter bank needed.
 
 # Arguments
-- `u`, `v`: east-west / north-south velocity components (equal length)
+- `u`, `v`: east-west / north-south velocity components (identical size;
+  time along dimension 1, trailing dimensions index independent signals,
+  exactly as in [`wavetrans`](@ref))
 - `dt`, `fs`, `nv`, `gamma`, `beta`: as in [`wavetrans`](@ref)
 
 # Returns
-- `wt_ccw::Matrix{ComplexF64}`: CCW-rotating wavelet coefficients `(N, n_freqs)`
-- `wt_cw::Matrix{ComplexF64}`: CW-rotating wavelet coefficients `(N, n_freqs)`
+- `wt_ccw::Array{ComplexF64}`: CCW-rotating wavelet coefficients `(N, n_freqs, trailing dims...)`
+- `wt_cw::Array{ComplexF64}`: CW-rotating wavelet coefficients, same shape
 - `fs::Vector{Float64}`: analysis frequencies (rad/sample), shared by both
 
 Both `wt_ccw` and `wt_cw` are ordinary `wavetrans`-shaped outputs, so
@@ -429,52 +490,30 @@ summary of both components.
 Lilly, J. M. & Olhede, S. C. (2010). Bivariate instantaneous frequency and
 bandwidth. IEEE Trans. Signal Process., 58(2), 591–603.
 """
-function rotary_wavetrans(u::AbstractVector{<:Real}, v::AbstractVector{<:Real};
+function rotary_wavetrans(u::AbstractArray{<:Real}, v::AbstractArray{<:Real};
                           dt::Real=1.0,
                           fs::Union{AbstractVector, Nothing}=nothing,
                           nv::Int=8,
                           gamma::Real=3.0,
                           beta::Real=8.0,
                           boundary::Symbol=:zeros)
-    length(u) == length(v) || error("u and v must have the same length")
-    N = length(u)
+    size(u) == size(v) || error("u and v must have the same size")
+    N = size(u, 1)
     (N < 1) && error("Input must have at least 1 sample")
 
     g, b = Float64(gamma), Float64(beta)
-    uf = _detrend_signal(collect(Float64, u))
-    vf = _detrend_signal(collect(Float64, v))
 
-    if fs === nothing
-        P, _, _ = morseprops(g, b)
-        density = max(1, round(Int, nv * P / 4))
-        fs = morsespace(g, b, N; density=density)
-    end
-    fs = collect(Float64, fs)
+    # Resolve the grid once from N so both branches share it exactly
+    fs_v = _resolve_freq_grid(N, g, b, nv, fs, nothing, dt)
 
-    w = uf .+ im .* vf
-    wc = conj.(w)
-    w_pad, N_fft, offset = _boundary_pad_complex(w, N, boundary)
-    wc_pad, _, _ = _boundary_pad_complex(wc, N, boundary)
+    # An analytic (one-sided) wavelet on w = u+iv isolates CCW content; on
+    # conj(w) = u-iv, CW content. wavetrans detrends internally (complex
+    # detrend ≡ separate detrends of u and v; see _detrend_signal).
+    W = ComplexF64.(u) .+ im .* ComplexF64.(v)
+    wt_ccw, _ = wavetrans(W; fs=fs_v, gamma=g, beta=b, boundary=boundary)
+    wt_cw, _ = wavetrans(conj.(W); fs=fs_v, gamma=g, beta=b, boundary=boundary)
 
-    bank = _build_filter_bank(N_fft, fs, g, b)
-
-    wt_ccw = _wavetrans_cpu(w_pad, bank, N, N_fft, length(fs); offset=offset)
-    wt_cw = _wavetrans_cpu(wc_pad, bank, N, N_fft, length(fs); offset=offset)
-
-    return wt_ccw, wt_cw, fs
-end
-
-# Complex-valued counterpart of _boundary_pad (see its docstring) -- same
-# :zeros/:mirror semantics, for the u+iv / u-iv rotary inputs.
-function _boundary_pad_complex(w::Vector{ComplexF64}, N::Int, boundary::Symbol)
-    if boundary === :zeros
-        N_fft = 2^ceil(Int, log2(2 * N - 1))
-        return vcat(w, zeros(ComplexF64, N_fft - N)), N_fft, 0
-    elseif boundary === :mirror
-        return vcat(reverse(w), w, reverse(w)), 3N, N
-    else
-        error("boundary must be :zeros or :mirror, got $boundary")
-    end
+    return wt_ccw, wt_cw, fs_v
 end
 
 """
@@ -519,78 +558,20 @@ end
 
 """
     wavetrans_batch(X::AbstractMatrix; dt=1.0, fs=nothing, nv=8,
-                    gamma=3.0, beta=8.0, gpu=false)
+                    gamma=3.0, beta=8.0, gpu=false, boundary=:zeros)
 
 Wavelet transform of multiple signals simultaneously.
 Each column of `X` is an independent time series.
+
+Superseded by calling [`wavetrans`](@ref) directly on the matrix (or any
+higher-rank array) — kept as a compatibility wrapper; it now also honors
+`boundary`, which the original standalone implementation did not.
 
 # Returns
 - `wt::Array{ComplexF64, 3}`: `(N, n_freqs, n_signals)`
 - `fs::Vector{Float64}`
 """
-function wavetrans_batch(X::AbstractMatrix;
-                         dt::Real=1.0,
-                         fs::Union{AbstractVector, Nothing}=nothing,
-                         scales::Union{AbstractVector, Nothing}=nothing,
-                         nv::Int=8,
-                         gamma::Real=3.0,
-                         beta::Real=8.0,
-                         gpu::Bool=false)
-
-    N, n_sig = size(X)
-    N_fft = 2^ceil(Int, log2(2*N - 1))
-    g = Float64(gamma); b = Float64(beta)
-
-    if fs === nothing && scales === nothing
-        P, _, _ = morseprops(g, b)
-        density = max(1, round(Int, nv * P / 4))
-        fs = morsespace(g, b, N; density=density)
-    elseif scales !== nothing
-        fs = 2π .* collect(Float64, scales) .* dt
-    end
-    fs = collect(Float64, fs)
-    n_fs = length(fs)
-
-    bank = _build_filter_bank(N_fft, fs, g, b)
-
-    # Detrend all signals before dispatch (CPU and GPU get same input)
-    X_det = collect(Float64, X)
-    for s in 1:n_sig
-        X_det[:, s] = _detrend_signal(X_det[:, s])
-    end
-
-    if gpu
-        wt = _wavetrans_batch_gpu(X_det, bank, N, N_fft, n_fs, n_sig)
-    else
-        wt = _wavetrans_batch_cpu(X_det, bank, N, N_fft, n_fs, n_sig)
-    end
-
-    # Factor of 2 for real input
-    if eltype(X) <: Real
-        wt .*= 2
-    end
-
-    return wt, fs
-end
-
-function _wavetrans_batch_cpu(X::Matrix{Float64}, bank::Matrix{Float64},
-                              N::Int, N_fft::Int, n_scales::Int, n_sig::Int)
-    wt = zeros(ComplexF64, N, n_scales, n_sig)
-    for s in 1:n_sig
-        x_pad = vcat(X[:, s], zeros(N_fft - N))
-        Xf = fft(x_pad)
-        for j in 1:n_scales
-            Y = Xf .* conj.(@view(bank[:, j]))
-            wt[:, j, s] .= ifft(Y)[1:N]
-        end
-    end
-    return wt
-end
-
-function _wavetrans_batch_gpu(X, bank, N, N_fft, n_scales, n_sig)
-    error("""GPU batch wavelet transform requires CUDA.jl.
-    Load it first:  `using CUDA`""")
-end
+wavetrans_batch(X::AbstractMatrix; kwargs...) = wavetrans(X; kwargs...)
 
 # ============================================================================
 # DECODE: amplitude, phase, instantaneous frequency & bandwidth
@@ -620,6 +601,29 @@ function tiredecode(wt::AbstractMatrix{<:Complex}, fs::AbstractVector;
     kind == "freq"      && return _instantaneous_frequency(wt)
     kind == "bandwidth" && return _instantaneous_bandwidth(wt)
     error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\")")
+end
+
+# N-D method (trailing dims = independent signals, matching wavetrans's
+# output layout): amp/phase are pointwise and apply directly; freq/bandwidth
+# run the 2-D kernel per signal slice. The Matrix method above stays the
+# dispatch target for 2-D input.
+function tiredecode(wt::AbstractArray{<:Complex}, fs::AbstractVector;
+                    kind::String="amp")
+    size(wt, 2) == length(fs) || error("fs must match dimension 2 of wt")
+
+    kind == "amp"   && return abs.(wt)
+    kind == "phase" && return angle.(wt)
+    kind in ("freq", "bandwidth") ||
+        error("Unknown kind: $kind (use \"amp\", \"phase\", \"freq\", \"bandwidth\")")
+
+    N, nf = size(wt, 1), size(wt, 2)
+    trailing = size(wt)[3:end]
+    w3 = reshape(wt, N, nf, :)
+    out = Array{Float64, 3}(undef, N, nf, size(w3, 3))
+    for k in axes(w3, 3)
+        out[:, :, k] = tiredecode(@view(w3[:, :, k]), fs; kind=kind)
+    end
+    return reshape(out, N, nf, trailing...)
 end
 
 function _instantaneous_frequency(wt::AbstractMatrix)
@@ -720,6 +724,28 @@ function ridgemap(wt::AbstractMatrix{<:Complex}, fs::AbstractVector;
 
     return quality ? (ridge_freq, ridge_amp, ridge_qual) : (ridge_freq, ridge_amp)
 end
+
+# ── N-D input guards ─────────────────────────────────────────────────────────
+# Ridge analysis is inherently per-signal: a ridge is a path through ONE
+# signal's (time × scale) plane, so there is no meaningful joint ridge over
+# a stack of independent signals. These guards turn what would otherwise be
+# a MethodError (or, for transmax, a silently wrong flattened answer) into
+# actionable guidance for the N-D arrays wavetrans now returns.
+function _nd_ridge_error(fname::String)
+    error("$fname operates on a single signal's (time × scale) wavelet " *
+          "transform. For the N-D output of wavetrans (trailing dims = " *
+          "independent signals), apply it per signal, e.g. " *
+          "`[$fname(wt[:, :, k], fs) for k in axes(wt, 3)]`.")
+end
+
+ridgemap(wt::AbstractArray{<:Complex}, fs::AbstractVector; kwargs...) =
+    _nd_ridge_error("ridgemap")
+ridgechains(wt::AbstractArray{<:Complex}, fs::AbstractVector; kwargs...) =
+    _nd_ridge_error("ridgechains")
+ridgechains_jlab(wt::AbstractArray{<:Complex}, fs::AbstractVector; kwargs...) =
+    _nd_ridge_error("ridgechains_jlab")
+transmax(wt::AbstractArray{<:Complex}; kwargs...) =
+    _nd_ridge_error("transmax")
 
 # ============================================================================
 # RIDGE CHAINING — ridgechains/ridgewalk (jLab algorithm)
@@ -921,7 +947,7 @@ end
 """
     wavelet_significance(x; dt=1.0, fs=nothing, nv=8, gamma=3.0, beta=8.0,
                         background=:white, confidence=0.95, n_surrogates=200,
-                        rng=Random.default_rng())
+                        gpu=false, rng=Random.default_rng())
 
 Per-scale significance threshold for the continuous wavelet power spectrum
 of `x`, for distinguishing a genuine ridge (an eddy, an inertial
@@ -963,6 +989,7 @@ function wavelet_significance(x::AbstractVector{<:Real};
                               background::Symbol=:white,
                               confidence::Real=0.95,
                               n_surrogates::Int=200,
+                              gpu::Bool=false,
                               rng::Random.AbstractRNG=Random.default_rng())
     xv = collect(Float64, x)
     N = length(xv)
@@ -983,13 +1010,18 @@ function wavelet_significance(x::AbstractVector{<:Real};
         alpha = denom > 0 ? clamp(sum(xc[1:end-1] .* xc[2:end]) / denom, 0.0, 0.95) : 0.0
     end
 
-    max_power = Matrix{Float64}(undef, n_surrogates, n_freq)
+    # Generate all surrogates first (same RNG consumption order as the old
+    # one-at-a-time loop), then transform them in a single batched N-D call
+    # — one FFT pass instead of n_surrogates sequential wavetrans calls.
+    surrogates = Matrix{Float64}(undef, N, n_surrogates)
     for s in 1:n_surrogates
-        surrogate = background == :white ? mu .+ sigma .* randn(rng, N) :
-                                            _ar1_surrogate(N, alpha, mu, sigma, rng)
-        wt_s, _ = wavetrans(surrogate; dt=dt, fs=fs_ref, nv=nv, gamma=gamma, beta=beta)
-        max_power[s, :] = vec(maximum(abs2.(wt_s); dims=1))
+        surrogates[:, s] = background == :white ? mu .+ sigma .* randn(rng, N) :
+                                                  _ar1_surrogate(N, alpha, mu, sigma, rng)
     end
+    wt_all, _ = wavetrans(surrogates; dt=dt, fs=fs_ref, nv=nv, gamma=gamma,
+                          beta=beta, gpu=gpu)
+    # (N, n_freq, n_surrogates) -> per-surrogate time-maximum power (n_surrogates, n_freq)
+    max_power = permutedims(dropdims(maximum(abs2.(wt_all); dims=1); dims=1))
 
     sig_level = [quantile(@view(max_power[:, j]), confidence) for j in 1:n_freq]
     return sig_level, fs_ref
@@ -1314,13 +1346,12 @@ function rotary_wavetrans_sphere(lat::AbstractVector{<:Real}, lon::AbstractVecto
     y = R .* cosd.(latv) .* sind.(lonv)
     z = R .* sind.(latv)
 
-    # Three independent real-input transforms sharing ONE frequency grid --
-    # pass fs= (not scales=) for y,z so they use the exact same grid the x
-    # call resolved, per this file's own established SENSE NOTE convention
-    # (validate_gulfdrifters_significant.jl).
-    wx, fs_out = wavetrans(x; dt=dt, fs=fs, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
-    wy, _ = wavetrans(y; dt=dt, fs=fs_out, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
-    wz, _ = wavetrans(z; dt=dt, fs=fs_out, nv=nv, gamma=gamma, beta=beta, boundary=boundary)
+    # Three real-input transforms sharing ONE frequency grid, exactly jLab's
+    # [wx,wy,wz]=wavetrans(x,y,z,...) (spheretrans.m:76) — the multi-input
+    # form batches all three through a single FFT pass and guarantees the
+    # shared grid structurally (no fs= re-passing needed).
+    wx, wy, wz, fs_out = wavetrans(x, y, z; dt=dt, fs=fs, nv=nv, gamma=gamma,
+                                   beta=beta, boundary=boundary)
 
     n_scales = length(fs_out)
     wxh = Matrix{ComplexF64}(undef, N, n_scales)
@@ -1937,4 +1968,72 @@ function _instfreq_joint(w_plus::AbstractMatrix{<:Complex}, w_minus::AbstractMat
         dfdt[:, j] = _vdiff_endpoint(@view(om[:, j]), dt)
     end
     return om, dfdt
+end
+
+# ============================================================================
+# TYPED ENTRY POINTS — TimeSeries* containers -> Types.WaveletTransform
+# (These live in src, not an extension: the wavelet machinery has no
+# weak dependency, unlike the Multitaper-gated spectral overloads.)
+# ============================================================================
+
+# Shared body for the Vector/Matrix container methods: derive dt from the
+# time axis (hard error on irregular sampling, via
+# Types._dt_hours_from_time), strip units on the way in per the house
+# convention, record everything needed for reinterpretation in params.
+function _wavetrans_typed(value::AbstractVecOrMat, time::Vector{Dates.DateTime},
+                          channels::Vector{String}, name::String; kwargs...)
+    isempty(value) && error("wavetrans: empty time series")
+    haskey(kwargs, :dt) &&
+        error("wavetrans(::TimeSeries...): dt is derived from the time axis; do not pass dt=")
+    dt_hours = Types._dt_hours_from_time(time)
+    u = Unitful.unit(first(value))
+    x = Unitful.ustrip.(value)
+    wt, fs_v = wavetrans(x; dt=dt_hours, kwargs...)
+    params = (; dt_hours=dt_hours, unit=u, name=name, kwargs...)
+    return Types.WaveletTransform(wt, fs_v, copy(time), channels, params)
+end
+
+"""
+    wavetrans(ts::TimeSeriesVector; kwargs...)
+    wavetrans(ts::TimeSeriesMatrix; kwargs...)
+    wavetrans(tc::TimeSeriesCollection; kwargs...)
+
+Typed overloads of [`wavetrans`](@ref): the sampling interval is derived
+from the container's time axis (in hours; irregular sampling errors
+clearly rather than silently averaging a `dt` — do not also pass `dt=`),
+values are stripped of their Unitful unit on the way in, and the result is
+a [`Types.WaveletTransform`](@ref) carrying the time axis, channel names
+(for `TimeSeriesMatrix`), and the original unit in `params.unit`
+(re-applied by `tiredecode(W; kind="amp")`).
+
+A `TimeSeriesCollection` (ragged records, no shared clock) cannot share
+one batched FFT, so it returns a `Vector{WaveletTransform}`, one per
+series — each on its own default frequency grid unless an explicit `fs=`
+is given (mirroring the batch-spectral `Vector{<:SpectralEstimate}`
+convention).
+"""
+wavetrans(ts::Types.TimeSeriesVector; kwargs...) =
+    _wavetrans_typed(ts.value, ts.time, String[], ts.name; kwargs...)
+
+wavetrans(ts::Types.TimeSeriesMatrix; kwargs...) =
+    _wavetrans_typed(ts.value, ts.time, copy(ts.channels), ts.name; kwargs...)
+
+wavetrans(tc::Types.TimeSeriesCollection; kwargs...) =
+    [wavetrans(s; kwargs...) for s in tc.series]
+
+"""
+    tiredecode(W::Types.WaveletTransform; kind="amp")
+
+Typed overload of [`tiredecode`](@ref): decodes `W.wt` against `W.fs`.
+For `kind="amp"` the source series' unit (`W.params.unit`, recorded by the
+typed [`wavetrans`](@ref) methods) is re-applied to the amplitude; the
+other kinds (`"phase"`, `"freq"`, `"bandwidth"`) are returned as bare
+`Float64` (radians / rad-per-sample quantities, unit-independent).
+"""
+function tiredecode(W::Types.WaveletTransform; kind::String="amp")
+    out = tiredecode(W.wt, W.fs; kind=kind)
+    if kind == "amp" && haskey(W.params, :unit)
+        return out .* W.params.unit
+    end
+    return out
 end

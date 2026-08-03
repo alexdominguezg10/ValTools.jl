@@ -11,7 +11,8 @@ include("Types/Types.jl")
 using .Types
 export TimeSeriesVector, TimeSeriesMatrix, TimeSeriesCollection, SpectralEstimate,
        RotarySpectralEstimate, RotaryCoherenceEstimate, CrossSpectralEstimate,
-       EllipsePolarizationEstimate, ColocatedObservation, ObsMetadata
+       EllipsePolarizationEstimate, ColocatedObservation, ObsMetadata,
+       WaveletTransform
 
 # ── Dispatch submodule (Polymorphic methods) ──────────────────────
 include("Dispatch/Dispatch.jl")

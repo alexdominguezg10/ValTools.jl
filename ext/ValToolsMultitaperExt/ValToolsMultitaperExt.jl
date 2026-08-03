@@ -30,6 +30,7 @@ const Met = ValTools.Metrics
 import ValTools.JLab: spectral_multitaper, mspec, sleptap
 import ValTools.Metrics: rotary_spectrum, rotary_coherence, cross_coherence, ellipse_polarization,
                          rotary_noise_spectrum, rotary_noise_surrogate
+import ValTools.Types: _dt_hours_from_time  # shared helper (hoisted from this ext 2026-08-03)
 
 include("spectral_multitaper.jl")
 include("rotary_spectrum.jl")

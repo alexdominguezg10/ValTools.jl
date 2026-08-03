@@ -17,6 +17,7 @@ oceanographic validation workflows.
 - `CrossSpectralEstimate`: Multitaper cross-spectrum/coherence between two real time series
 - `ColocatedObservation`: Model-obs colocation result
 - `ObsMetadata`: Structured metadata (source, QC, location, etc.)
+- `WaveletTransform{Q<:Number, N}`: Continuous wavelet transform coefficients + parameters
 
 `Q` is inferred automatically from the `value`/`power` array passed to
 the constructor — pass Unitful-quantity data (e.g. `randn(10) * u"m/s"`)
@@ -33,6 +34,7 @@ include("types_def.jl")
 
 export TimeSeriesVector, TimeSeriesMatrix, TimeSeriesCollection, SpectralEstimate,
        RotarySpectralEstimate, RotaryCoherenceEstimate, CrossSpectralEstimate,
-       EllipsePolarizationEstimate, ColocatedObservation, ObsMetadata
+       EllipsePolarizationEstimate, ColocatedObservation, ObsMetadata,
+       WaveletTransform
 
 end # module

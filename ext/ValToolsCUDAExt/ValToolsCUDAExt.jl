@@ -24,49 +24,27 @@ using Multitaper: dpss_tapers
 
 const JL = ValTools.JLab
 
-import ValTools.JLab: _wavetrans_gpu, _wavetrans_batch_gpu,
+import ValTools.JLab: _wavetrans_nd_gpu,
                       spectral_multitaper_gpu, spectral_multitaper_batch_gpu
 
 # ============================================================================
-# GPU WAVELET TRANSFORM — single signal
+# GPU WAVELET TRANSFORM — N-D engine backend
+# One implementation for every wavetrans entry point (vector, matrix,
+# higher-rank trailing dims, rotary complex input): receives the
+# already-padded (N_fft × n_sig) signal matrix plus the boundary `offset`,
+# so :zeros and :mirror both extract the correct N samples (the old
+# single-signal GPU path hardcoded [1:N] and silently returned the wrong
+# window under boundary=:mirror). Chunks across signals to keep CUFFT
+# plans within GPU memory.
 # ============================================================================
 
-function JL._wavetrans_gpu(x_pad::Vector{Float64}, bank::Matrix{Float64},
-                           N::Int, N_fft::Int, n_scales::Int)
-
-    d_x    = CuArray(ComplexF64.(x_pad))
-    d_bank = CuArray(ComplexF64.(bank))   # complex for conj
-
-    d_X = CUFFT.fft(d_x)
-
-    # Chunk scales to fit in GPU memory
-    chunk_size = min(n_scales, 128)
-    wt = zeros(ComplexF64, N, n_scales)
-
-    for j_start in 1:chunk_size:n_scales
-        j_end = min(j_start + chunk_size - 1, n_scales)
-        n_chunk = j_end - j_start + 1
-
-        d_X_rep = repeat(d_X, 1, n_chunk)
-        d_prod  = d_X_rep .* conj.(@view(d_bank[:, j_start:j_end]))
-        d_result = CUFFT.ifft(d_prod, 1)
-
-        wt[:, j_start:j_end] .= Array(d_result[1:N, :])
-    end
-
-    return wt
-end
-
-# ============================================================================
-# GPU WAVELET TRANSFORM — batch of signals
-# Chunks across signals to keep CUFFT plans within GPU memory.
-# ============================================================================
-
-function JL._wavetrans_batch_gpu(X::Matrix{Float64}, bank::Matrix{Float64},
-                                 N::Int, N_fft::Int, n_scales::Int, n_sig::Int)
+function JL._wavetrans_nd_gpu(X_pad::AbstractMatrix{<:Union{Float64, ComplexF64}},
+                              bank::Matrix{Float64}, N::Int, offset::Int)
+    N_fft, n_sig = size(X_pad)
+    n_scales = size(bank, 2)
 
     d_bank = CuArray(ComplexF64.(bank))   # complex for conj
-    wt = zeros(ComplexF64, N, n_scales, n_sig)
+    wt = Array{ComplexF64, 3}(undef, N, n_scales, n_sig)
 
     # Chunk: target ~16 GB per 3D array (H200 has 141 GB)
     bytes_per_element = 16  # ComplexF64
@@ -77,8 +55,7 @@ function JL._wavetrans_batch_gpu(X::Matrix{Float64}, bank::Matrix{Float64},
         s_end = min(s_start + chunk_sig - 1, n_sig)
         nc = s_end - s_start + 1
 
-        X_chunk = vcat(X[:, s_start:s_end], zeros(N_fft - N, nc))
-        d_X_chunk = CuArray(ComplexF64.(X_chunk))
+        d_X_chunk = CuArray(ComplexF64.(X_pad[:, s_start:s_end]))
 
         d_Xf = CUFFT.fft(d_X_chunk, 1)
 
@@ -88,7 +65,7 @@ function JL._wavetrans_batch_gpu(X::Matrix{Float64}, bank::Matrix{Float64},
 
         d_result = CUFFT.ifft(d_prod, 1)
 
-        wt[:, :, s_start:s_end] .= Array(d_result[1:N, :, :])
+        wt[:, :, s_start:s_end] .= Array(d_result[offset+1:offset+N, :, :])
     end
 
     return wt
@@ -96,17 +73,13 @@ end
 
 # ============================================================================
 # AUTO-DETECT: CuArray input → GPU path
+# Forwards ALL kwargs (the old CuVector method dropped fs and boundary,
+# making them silently unusable on this path); the trailing explicit
+# gpu=true wins over any gpu in kwargs.
 # ============================================================================
 
-function JL.wavetrans(x::CuVector;
-                      dt::Real=1.0,
-                      scales::Union{AbstractVector, Nothing}=nothing,
-                      nv::Int=8,
-                      mother::String="morse",
-                      gamma::Real=3.0,
-                      beta::Real=8.0,
-                      gpu::Bool=true)
-    JL.wavetrans(Array(x); dt, scales, nv, mother, gamma, beta, gpu=true)
+function JL.wavetrans(X::CuArray{<:Number}; kwargs...)
+    JL.wavetrans(Array(X); kwargs..., gpu=true)
 end
 
 # ============================================================================

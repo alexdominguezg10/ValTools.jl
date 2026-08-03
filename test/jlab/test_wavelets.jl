@@ -271,4 +271,131 @@ Random.seed!(42)
         @test_throws ErrorException ridge_significant([1.0], [1.0, 2.0], sig_level, fs)
         @test_throws ErrorException ridge_significant(rf, ra, [1.0], fs)
     end
+
+    # ========================================================================
+    # N-D SUPPORT (jLab trailing-dims semantics: dim 1 = time, trailing
+    # dims = independent signals). The per-column equivalence tests below
+    # are the regression guard for the unified transform engine.
+    # ========================================================================
+
+    @testset "wavetrans N-D — per-column equivalence" begin
+        rng = MersenneTwister(11)
+        N = 200
+        X = randn(rng, N, 3)
+
+        for boundary in (:zeros, :mirror)
+            wt3, fs3 = wavetrans(X; boundary=boundary)
+            @test size(wt3) == (N, length(fs3), 3)
+            for k in 1:3
+                wtk, fsk = wavetrans(X[:, k]; boundary=boundary)
+                @test fsk == fs3
+                @test wt3[:, :, k] ≈ wtk rtol=1e-12
+            end
+        end
+
+        # Rank-3 input (N, 2, 2): trailing dims preserved, slices match
+        X4 = reshape(randn(rng, N * 4), N, 2, 2)
+        wt4, fs4 = wavetrans(X4)
+        @test size(wt4) == (N, length(fs4), 2, 2)
+        for i in 1:2, j in 1:2
+            wtk, _ = wavetrans(X4[:, i, j])
+            @test wt4[:, :, i, j] ≈ wtk rtol=1e-12
+        end
+    end
+
+    @testset "wavetrans — multi-input jLab form" begin
+        rng = MersenneTwister(12)
+        N = 150
+        x, y, z = randn(rng, N), randn(rng, N), randn(rng, N)
+
+        wx, wy, wz, fs = wavetrans(x, y, z)
+        wx1, fs1 = wavetrans(x)
+        @test fs == fs1
+        @test wx ≈ wx1 rtol=1e-12
+        @test wy ≈ wavetrans(y)[1] rtol=1e-12
+        @test wz ≈ wavetrans(z)[1] rtol=1e-12
+
+        # Matrix inputs stack along a new trailing dim
+        A, B = randn(rng, N, 2), randn(rng, N, 2)
+        wA, wB, fsm = wavetrans(A, B)
+        @test size(wA) == (N, length(fsm), 2)
+        @test wA ≈ wavetrans(A)[1] rtol=1e-12
+
+        @test_throws ErrorException wavetrans(x, randn(rng, N + 1))
+        @test_throws ErrorException wavetrans(x, complex.(y))  # mixed real/complex
+    end
+
+    @testset "wavetrans — complex input (no factor of 2)" begin
+        rng = MersenneTwister(13)
+        N = 200
+        u = randn(rng, N)
+        v = randn(rng, N)
+        w = complex.(u, v)
+
+        wtc, fsc = wavetrans(w)
+        @test size(wtc) == (N, length(fsc))
+        # Complex input is exactly the CCW branch of rotary_wavetrans
+        ccw, _, fsr = rotary_wavetrans(u, v)
+        @test fsc == fsr
+        @test wtc ≈ ccw rtol=1e-12
+    end
+
+    @testset "rotary_wavetrans — N-D per-column equivalence" begin
+        rng = MersenneTwister(14)
+        N = 180
+        U, V = randn(rng, N, 3), randn(rng, N, 3)
+
+        ccw3, cw3, fs3 = rotary_wavetrans(U, V)
+        @test size(ccw3) == (N, length(fs3), 3)
+        for k in 1:3
+            ccwk, cwk, fsk = rotary_wavetrans(U[:, k], V[:, k])
+            @test fsk == fs3
+            @test ccw3[:, :, k] ≈ ccwk rtol=1e-12
+            @test cw3[:, :, k] ≈ cwk rtol=1e-12
+        end
+
+        @test_throws ErrorException rotary_wavetrans(U, randn(rng, N, 2))
+    end
+
+    @testset "tiredecode — N-D trailing dims" begin
+        rng = MersenneTwister(15)
+        X = randn(rng, 120, 3)
+        wt3, fs = wavetrans(X)
+
+        for kind in ("amp", "phase", "freq", "bandwidth")
+            out3 = tiredecode(wt3, fs; kind=kind)
+            @test size(out3) == size(wt3)
+            for k in 1:3
+                @test out3[:, :, k] ≈ tiredecode(wt3[:, :, k], fs; kind=kind) rtol=1e-12
+            end
+        end
+        @test_throws ErrorException tiredecode(wt3, fs; kind="bogus")
+        @test_throws ErrorException tiredecode(wt3, fs[1:3]; kind="amp")
+    end
+
+    @testset "ridge functions — N-D input guards" begin
+        wt3 = randn(ComplexF64, 50, 10, 2)
+        fs = collect(range(1.0, 0.1; length=10))
+        @test_throws ErrorException ridgemap(wt3, fs)
+        @test_throws ErrorException ridgechains(wt3, fs)
+        @test_throws ErrorException ridgechains_jlab(wt3, fs)
+        @test_throws ErrorException transmax(wt3)
+    end
+
+    @testset "wavetrans_batch — forwards to wavetrans, honors boundary" begin
+        rng = MersenneTwister(16)
+        X = randn(rng, 128, 4)
+        wt_b, fs_b = wavetrans_batch(X)
+        wt_n, fs_n = wavetrans(X)
+        @test fs_b == fs_n
+        @test wt_b == wt_n
+        # boundary was silently unsupported by the old standalone batch path
+        wt_bm, _ = wavetrans_batch(X; boundary=:mirror)
+        @test wt_bm ≈ wavetrans(X; boundary=:mirror)[1] rtol=1e-12
+        @test !(wt_bm ≈ wt_b)
+    end
+
+    @testset "wavelet_significance — gpu kwarg stub errors without CUDA" begin
+        @test_throws ErrorException wavelet_significance(randn(64); n_surrogates=4, gpu=true)
+    end
 end
