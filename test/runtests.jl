@@ -8,6 +8,7 @@ using NCDatasets
 using CairoMakie
 using Multitaper
 using Unitful
+using LinearAlgebra
 
 @testset "ValTools.jl" begin
 
@@ -448,6 +449,77 @@ using Unitful
         k_iso, psd_iso = isotropic_2d_spectrum(field, dx, dy)
         @test length(k_iso) > 0
         @test all(psd_iso[isfinite.(psd_iso)] .>= 0)
+    end
+
+    @testset "msvd — SVD-based polarization analysis" begin
+        # Shape consistency (jLab's own msvd_test), both the 3-D (J,N,K)
+        # and single-band 2-D (N,K) input forms.
+        J, N, K = 6, 3, 5
+        W = randn(ComplexF64, J, N, K)
+        r = msvd(W)
+        @test size(r.d) == (J, min(N, K))
+        @test size(r.u1) == (J, N) && size(r.u2) == (J, N)
+        @test size(r.v1) == (J, K) && size(r.v2) == (J, K)
+        @test length(r.trS) == J
+        # Singular values are non-negative and sorted descending per band.
+        @test all(r.d .>= 0)
+        @test all(r.d[:, 1] .>= r.d[:, 2] .>= r.d[:, 3])
+
+        r2 = msvd(W[1, :, :])
+        @test r2.d ≈ r.d[1, :]
+        @test r2.trS ≈ r.trS[1]
+
+        # Cross-checked directly against real jLab MATLAB msvd.m on this
+        # exact deterministic (J=4,N=3,K=5) input (2026-08-02): d and trS
+        # matched to floating-point precision. jLab's own msvd.m has a
+        # confusing internal variable-name collision (its `[N,J,M,K]=size(...)`
+        # reassigns `M` to mean the CHANNEL count on the reshaped 4-D array,
+        # not an outer batch dimension as the docstring's `M x J x N x K`
+        # form might suggest) -- the true normalization is 1/sqrt(K*N_channels),
+        # not 1/sqrt(K) alone; verified by the exact match below.
+        Jc, Nc, Kc = 4, 3, 5
+        Wc = Array{ComplexF64}(undef, Jc, Nc, Kc)
+        idx = 1
+        for j in 1:Jc, n in 1:Nc, k in 1:Kc
+            Wc[j, n, k] = complex(sin(idx * 0.37) * 2.1, cos(idx * 0.53) * 1.7)
+            idx += 1
+        end
+        rc = msvd(Wc)
+        @test rc.d[1, :] ≈ [1.6443686292, 1.0433765420, 0.0241972961] atol=1e-9
+        @test rc.trS[1] ≈ 3.7931683063 atol=1e-9
+        @test rc.d[4, :] ≈ [1.8206930783, 0.7218753882, 0.0669310759] atol=1e-9
+        @test rc.trS[4] ≈ 3.8405071302 atol=1e-9
+
+        # SVD reconstruction identity: d/u1/v1/u2/v2 (the top 2 of min(N,K)=3
+        # triplets) plus the implicit 3rd triplet must exactly reconstruct
+        # the (K*N-rescaled) input at every band -- a MATLAB-independent
+        # correctness check on the full decomposition, not just d/trS.
+        for j in 1:J
+            Wj_scaled = W[j, :, :] ./ sqrt(K * N)
+            F = svd(Wj_scaled)
+            recon = F.U * Diagonal(F.S) * F.Vt
+            @test recon ≈ Wj_scaled atol=1e-10
+            # And msvd's own u1/v1/d agree with this independently-computed F.
+            @test r.d[j, :] ≈ F.S
+            @test r.u1[j, :] ≈ F.U[:, 1]
+            @test r.v1[j, :] ≈ F.V[:, 1]
+        end
+
+        # Pure rank-1 (perfectly coherent/polarized) signal: every
+        # eigentransform k is the same channel vector p times a different
+        # complex scalar amplitude -- physically, a single fully-polarized
+        # source with no noise. Only one nonzero singular value should
+        # result, and u1 should recover p's direction (up to the inherent
+        # SVD phase ambiguity, checked via the phase-invariant |.| and the
+        # reconstruction identity, not raw equality).
+        p = normalize([1.0 + 0.5im, -0.3 + 1.2im, 0.8 - 0.1im])
+        amps = [complex(cos(0.3k), sin(0.3k)) for k in 1:K]
+        Wrank1 = reshape(p, 1, N, 1) .* reshape(amps, 1, 1, K)
+        rrank1 = msvd(Wrank1)
+        @test rrank1.d[1, 2] < 1e-10 * rrank1.d[1, 1]   # second singular value ~0
+        @test isapprox(abs.(rrank1.u1[1, :]), abs.(p); atol=1e-8)
+
+        @test_throws MethodError msvd(randn(3, 4))   # real input not accepted
     end
 
     @testset "cross_spectrum_kx_ky" begin

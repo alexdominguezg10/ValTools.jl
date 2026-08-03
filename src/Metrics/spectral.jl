@@ -537,3 +537,124 @@ function fftshift(x::AbstractMatrix)
         hcat(x[1:my, mx+1:end],     x[1:my, 1:mx])
     )
 end
+
+# ============================================================================
+# SVD-BASED POLARIZATION ANALYSIS (Park, Vernon & Lindberg 1987)
+# ============================================================================
+
+"""
+    msvd(W::AbstractArray{<:Complex,3})
+
+Multiple-transform (SVD-based) polarization analysis. Ported from jLab's
+`jSpectral/msvd.m`. Pure linear algebra — no dependency on how `W` was
+computed (multitaper eigencoefficients, multi-order wavelet coefficients,
+...), so unlike [`rotary_spectrum`](@ref)/[`ellipse_polarization`](@ref)
+this does NOT require `using Multitaper`.
+
+`W` holds complex "eigentransform" coefficients: `size(W) == (J, N, K)`
+where `J` is the number of frequency/scale bands, `N` is the number of
+simultaneous data-set channels (e.g. `N=2` for a bivariate `u,v` velocity
+record), and `K` is the number of eigentransforms (multitaper tapers, or
+multi-order wavelets) sharing that band. At each band `j`, the `N x K`
+sub-matrix `W[j,:,:]` (rescaled by `1/sqrt(K*N)`, matching jLab's own
+normalization — see the note on `scale` in the implementation for why it's
+`K*N` and not just `K`) is singular-value-decomposed:
+`W[j,:,:]/sqrt(K*N) = U*Diagonal(d)*V'`.
+
+Unlike forming the spectral matrix `S = W*W'/K` and eigendecomposing it
+directly (the `specdiag`-based route `ellipse_polarization` and
+[`JLab.ellpol`](@ref) both use, averaged/pooled over eigentransforms first),
+MSVD works on the raw per-eigentransform matrix directly, giving BOTH:
+- `u1`: the leading LEFT singular vector at each band — the eigenvector of
+  the (implicit) `N x N` spectral matrix, i.e. the dominant polarization
+  direction across channels. Carries the same information
+  `ellipse_polarization`'s `theta`/`d1`/`d2` give via a different route
+  (`|d[:,1]|^2` here is that route's `d1`).
+- `v1`: the leading RIGHT singular vector — the eigenvector of the `K x K`
+  "structure matrix", the pattern of agreement ACROSS the `K`
+  eigentransforms themselves. This has no analog in the spectral-matrix
+  route and is what makes MSVD useful for signal detection: a genuinely
+  polarized/coherent signal has `v1` close to a constant vector (every
+  eigentransform agrees on it), while incoherent noise does not.
+
+`d[j,1]^2 / trS[j]` is the fraction of power at band `j` explained by the
+single dominant polarized signal. `u2`/`v2` (the SECOND singular vectors)
+support two-signal/signal-plus-noise separation, per jLab's own test —
+e.g. projecting a known polarization structure onto `u1` vs. `u2` to
+estimate per-band SNR (see `msvd_test2` in `jSpectral/msvd.m`).
+
+Note on singular-vector sign/phase: as with any SVD, `(u1[j,:], v1[j,:])`
+for a given band are only determined up to a common unit-phase factor —
+`u1[j,:]*d[j,1]*v1[j,:]'` (the rank-1 reconstruction) is the
+phase-invariant quantity, not `u1`/`v1` individually. Two correct
+implementations (e.g. this one vs. real jLab MATLAB) can therefore return
+`u1`/`v1` differing by an overall phase per band while still agreeing
+exactly on `d` and on that reconstruction — confirmed directly against
+real jLab output (2026-08-02).
+
+# Returns
+`NamedTuple` with:
+- `d`: `(J, min(N,K))` singular values
+- `u1`, `u2`: `(J, N)` first/second left singular vectors
+- `v1`, `v2`: `(J, K)` first/second right singular vectors
+- `trS`: `(J,)` trace of the implicit spectral matrix `W*W'/K` at each band
+
+# References
+Park, J., Vernon, F. L., & Lindberg, C. R. (1987). Frequency dependent
+polarization analysis of high-frequency seismograms. J. Geophys. Res.,
+92(B12), 12664–12674. Note jLab's own convention for `u1`/`v1` is the
+TRANSPOSE of Park et al.'s original (per `msvd.m`'s own comment) — this
+port matches jLab, not the original paper directly.
+"""
+function msvd(W::AbstractArray{<:Complex,3})
+    J, N, K = size(W)
+    minNK = min(N, K)
+    # msvd.m normalizes by 1/sqrt(K*M) where, confusingly, its internal `M`
+    # (reassigned via `[N,J,M,K]=size(mmat)` on the reshaped 4-D array) is
+    # the CHANNEL count -- i.e. this file's `N` -- not an outer batch
+    # dimension as the docstring's optional `M x J x N x K` form might
+    # suggest. Verified directly against real MATLAB output (2026-08-02):
+    # using 1/sqrt(K) alone reproduced u1/v1 (scale-invariant) but was off
+    # from real d/trS by exactly sqrt(N) in every band.
+    scale = 1 / sqrt(K * N)
+
+    d = Matrix{Float64}(undef, J, minNK)
+    u1 = Matrix{ComplexF64}(undef, J, N)
+    v1 = Matrix{ComplexF64}(undef, J, K)
+    u2 = Matrix{ComplexF64}(undef, J, N)
+    v2 = Matrix{ComplexF64}(undef, J, K)
+    trS = Vector{Float64}(undef, J)
+
+    for j in 1:J
+        Wj = scale .* @view(W[j, :, :])   # N x K
+        F = svd(Wj)                        # Wj = F.U * Diagonal(F.S) * F.V'
+        d[j, :] = F.S
+        u1[j, :] = F.U[:, 1]
+        v1[j, :] = F.V[:, 1]
+        if minNK >= 2
+            u2[j, :] = F.U[:, 2]
+            v2[j, :] = F.V[:, 2]
+        else
+            u2[j, :] .= 0
+            v2[j, :] .= 0
+        end
+        trS[j] = sum(abs2, Wj)
+    end
+
+    return (d=d, u1=u1, v1=v1, u2=u2, v2=v2, trS=trS)
+end
+
+"""
+    msvd(W::AbstractMatrix{<:Complex})
+
+Single-band convenience form of [`msvd`](@ref): `W` is `N x K` (one
+frequency/scale band's eigentransform matrix directly, no leading `J`
+axis) — matches jLab's own dual-mode `msvd` input handling. Returns the
+same fields as the 3-argument form but with the `J` axis squeezed out
+(`d`/`u1`/`v1`/`u2`/`v2` become plain vectors, `trS` a scalar).
+"""
+function msvd(W::AbstractMatrix{<:Complex})
+    N, K = size(W)
+    r = msvd(reshape(W, 1, N, K))
+    return (d=vec(r.d), u1=vec(r.u1), v1=vec(r.v1), u2=vec(r.u2), v2=vec(r.v2), trS=r.trS[1])
+end
