@@ -1,0 +1,80 @@
+# # Detecting a coherent signal with SVD-based polarization (msvd)
+#
+# `Metrics.ellipse_polarization` characterizes polarization by pooling
+# per-taper spectra into one averaged spectral matrix and eigendecomposing
+# it. `msvd` (Park, Vernon & Lindberg 1987) instead singular-value-decomposes
+# each frequency band's raw `channels × looks` eigentransform matrix
+# directly, *before* any pooling — and that gives something the pooled route
+# can't: the fraction of a band's total power explained by a single rank-1
+# (fully coherent, fully polarized) structure, `d₁²/trace(S)`. For a
+# genuinely coherent bivariate oscillation this ratio sits near 1; for two
+# independent noise channels its *asymptotic* (many-look) value is 0.5 — a
+# clean, single-run signal-detection statistic. With only `K` looks per
+# band, picking the larger of two random sample eigenvalues is itself
+# biased upward from that limit (a standard finite-sample effect, not a
+# flaw in the statistic) — `K=40` below keeps that bias small enough that
+# the true signal still stands out sharply above the noise floor.
+#
+# `msvd` itself doesn't care where the `K` "looks" of each band come from —
+# real Slepian tapers, or (as here, to keep this example dependency-free) `K`
+# non-overlapping Hann-windowed segments of the record, each giving one
+# independent estimate of every frequency band. We bury a circularly
+# polarized oscillation in independent per-channel noise and ask `msvd` to
+# find the frequency band where the signal actually lives, purely from how
+# "rank-1" that band's structure is.
+
+using ValTools.Metrics, FFTW, Statistics, CairoMakie, Random
+Random.seed!(5)
+
+K  = 40                        # more independent looks -> less finite-K bias in the noise baseline
+ns = 300                       # samples per segment (sets frequency resolution)
+n  = K * ns
+dt = 1.0
+f0 = 0.08                      # cycles/sample -- the true signal frequency
+u = 0.4 .* cos.(2π * f0 .* (0:n-1)) .+ 0.5 .* randn(n)
+v = 0.4 .* sin.(2π * f0 .* (0:n-1)) .+ 0.5 .* randn(n)   # circularly polarized (CCW) + noise
+
+hann = 0.5 .- 0.5 .* cos.(2π .* (0:ns-1) ./ (ns - 1))
+
+# True positive frequencies only (indices 2:ns÷2 of a real-input FFT) —
+# NOT `(0:ns-1)./(ns*dt) .> 0`, which for a real signal's Hermitian-symmetric
+# spectrum would keep the upper half's *aliased mirror* of the negative
+# frequencies (bins above Nyquist wrap around to negative freq, not to freq
+# values above 1/dt) and corrupt every band above 0.5 cycles/sample.
+pos = 2:(ns ÷ 2)
+freqs_pos = (pos .- 1) ./ (ns * dt)
+nfreq = length(freqs_pos)
+
+# Build the (J, N=2, K) eigentransform array msvd expects: one complex FFT
+# coefficient per (band, channel, segment).
+W = Array{ComplexF64}(undef, nfreq, 2, K)
+for k in 1:K
+    seg = (k-1)*ns+1:k*ns
+    W[:, 1, k] = fft(u[seg] .* hann)[pos]
+    W[:, 2, k] = fft(v[seg] .* hann)[pos]
+end
+
+r = msvd(W)
+explained = r.d[:, 1] .^ 2 ./ r.trS   # fraction of power in the dominant (rank-1) mode
+
+peak = argmax(explained)
+noise_bands = abs.(freqs_pos .- f0) .> 0.05
+println("Peak explained-power frequency: ", round(freqs_pos[peak], digits=4),
+        "  (true: ", f0, ")")
+println("Explained fraction at the signal band: ", round(explained[peak], digits=3),
+        "  (1.0 = fully coherent/rank-1)")
+println("Mean explained fraction elsewhere:     ", round(mean(explained[noise_bands]), digits=3),
+        "  (asymptotic limit for independent noise is 0.5; finite K=$K biases this up)")
+
+fig = Figure(size=(600, 400))
+ax = Axis(fig[1, 1], xlabel="Frequency (cycles/sample)",
+          ylabel="Explained fraction, d₁²/trace(S)",
+          title="MSVD rank-1 power fraction, K=$K segments")
+lines!(ax, freqs_pos, explained, color=:dodgerblue, linewidth=1.5)
+hlines!(ax, [0.5], color=:gray, linestyle=:dash, label="asymptotic noise floor (K→∞)")
+vlines!(ax, [f0], color=:orangered, linestyle=:dash, label="true signal freq")
+xlims!(ax, 0, 0.25)
+axislegend(ax)
+
+save(joinpath(@__DIR__, "svd_polarization_detection.png"), fig)
+println("Saved svd_polarization_detection.png")
