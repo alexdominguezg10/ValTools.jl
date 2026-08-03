@@ -36,6 +36,7 @@ try
         "multitaper_line_detection.jl",
         "mooring_array_batch.jl",
         "unit_safe_validation.jl",
+        "gomed_eddy_census.jl",
     ]
 
     @info "Processing $(length(examples_to_process)) examples with Literate.jl..."
@@ -97,6 +98,9 @@ try
             "Multitaper Spectral" => "generated/multitaper_line_detection.md",
             "Colocation & Validation" => "generated/mooring_array_batch.md",
             "Unit-Safe Validation" => "generated/unit_safe_validation.md",
+            "Case Studies" => [
+                "GOMED Eddy Census" => "generated/gomed_eddy_census.md",
+            ],
         ],
         "API Reference" => "api.md",
         "Contributing" => "contributing.md",

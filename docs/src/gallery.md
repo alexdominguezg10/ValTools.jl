@@ -143,10 +143,11 @@ These examples demonstrate the crown jewel of ValTools.jl: wavelet analysis for 
 
 ```@raw html
 <div class="demo-grid">
-<div class="demo-card-future">
-  <h3>🌀 GOMED Eddy Census</h3>
-  <p>Extract cyclonic/anticyclonic eddies from CROCO output using wavelet ridge chains; compute census statistics (radius, decay rate, translation speed) and compare to satellite observations.</p>
-</div>
+<a class="demo-card" href="generated/gomed_eddy_census.html">
+  <img src="assets/gomed_eddy_census_thumb.png" alt="GOMED eddy census case study">
+  <h3>🌀 Detecting Significant Eddies in Real Drifter Data</h3>
+  <p>Production output of the rotary-ridge significance-test pipeline on the real, public GulfDriftersOpen dataset (2684 drifters): 497 significant eddy events, 86.5% cyclonic — compared against the paper's own published headline statistics.</p>
+</a>
 
 <div class="demo-card-future">
   <h3>🌊 GulfDrifters Velocity Wavenumber Spectrum</h3>

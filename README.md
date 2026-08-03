@@ -972,6 +972,30 @@ low time-averaged `P`* — not a bug, but `ellpol` correctly reporting that
 one fixed polarization state is a poor summary of a signal whose character
 changes a lot over the record; see the script for the full explanation.
 
+### [Case study: detecting significant eddies in real Lagrangian drifter data](examples/gomed_eddy_census.jl)
+
+Every other example above uses synthetic data. This one is production
+output: `local_tangent_plane` + `rotary_ridge_properties` +
+`density_ratio_significance` (Lilly & Pérez-Brunius 2021, *NPG* 28,
+181–212 — jLab's `eddyridges.m`/`spheretrans.m`, which wavelet-transforms
+*position*, never velocity) run on the real, public GulfDriftersOpen
+dataset (2684 Gulf of Mexico drifters). The full census is a multi-hour HPC
+job, so the example loads the pipeline's own ~36 KB output CSV and
+reproduces its summary statistics and figures from that.
+
+![Ridge length and rotation-sense distributions of 497 significant eddy events](examples/gomed_eddy_census.png)
+
+```julia
+events = read_events_csv("gomed_eddy_census_data.csv")   # pipeline's own output, bundled
+# 497 significant events, 86.5% cyclonic — consistent with the paper's published asymmetry
+```
+
+*Note on GOMED:* the published GOMED eddy-census NetCDF is
+non-commercial/no-redistribution licensed and is not used, shipped, or
+plotted anywhere in this example. What's compared above is our own
+detections against the paper's own **published** headline figures
+(Sect. 4.7) — not against GOMED's underlying per-ridge data.
+
 ---
 
 *ValTools.jl v0.1.0 — A. Dominguez, CICESE, 2026*
