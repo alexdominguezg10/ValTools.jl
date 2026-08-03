@@ -1,45 +1,38 @@
 # Deployment Guide: ValTools.jl Gallery
 
-The ValTools.jl examples gallery is automatically built and deployed to GitHub Pages on every push to `main`.
+The ValTools.jl examples gallery is automatically built and deployed to GitHub Pages on every push to `main`, via the GitHub Actions Pages deployment (not a committed-branch build).
 
 ## How it works
 
 1. **Push to main** → GitHub Actions triggers
-2. **Julia builds docs** via `julia docs/make.jl`
-3. **Generated HTML** in `docs/build/` is committed back to the repo
-4. **GitHub Pages** serves from `/docs/build/` → live at `https://alexdominguezg10.github.io/ValTools.jl/`
+2. **Julia builds docs** via `julia docs/make.jl` → `docs/build/` (not committed; gitignored)
+3. **`actions/upload-pages-artifact`** uploads `docs/build/` as the Pages artifact
+4. **`actions/deploy-pages`** publishes it → live at `https://alexdominguezg10.github.io/ValTools.jl/`
 
 ## Setup (one-time)
 
 ### 1. Enable GitHub Pages
 
-Go to repo **Settings** → **Pages**:
-- **Source**: Deploy from a branch
-- **Branch**: `main`
-- **Folder**: `/docs/build`
-- Click Save
+Repo must be public (or on a plan supporting private-repo Pages) — GitHub Pages does not commit any HTML into git. Then:
 
-### 2. Allow CI to push
+Go to repo **Settings** → **Pages** → **Source**: GitHub Actions.
 
-The `.github/workflows/docs.yml` already has the right permissions (`contents: write`). No additional setup needed.
+### 2. Workflow permissions
+
+`.github/workflows/docs.yml` requests `pages: write` and `id-token: write` — required by `actions/deploy-pages`. No branch-push permission is needed anymore.
 
 ### 3. That's it!
 
-Every push to main will auto-build and deploy the gallery.
+Every push to main will auto-build and deploy the gallery; PRs get the build uploaded as a downloadable artifact instead (no deploy).
 
-## Manual deployment
-
-To build and commit docs locally:
+## Manual local preview
 
 ```bash
-# Build
-julia docs/make.jl
-
-# Commit (if changed)
-git add docs/build/
-git commit -m "Deploy gallery: [your message]"
-git push origin main
+julia --project=docs docs/make.jl
+open docs/build/index.html
 ```
+
+`docs/build/` is gitignored — nothing here needs to be committed.
 
 ## Monitoring
 

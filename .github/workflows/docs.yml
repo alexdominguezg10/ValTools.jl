@@ -17,15 +17,20 @@ on:
       - 'examples/**'
       - 'src/**'
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Allow pushing docs back to repo
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for git operations
 
       - uses: julia-actions/setup-julia@v2
         with:
@@ -39,24 +44,27 @@ jobs:
         run: |
           julia --project=docs docs/make.jl
 
-      - name: Commit and push docs (main only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-
-          # Check if docs/build has changes
-          if [ -n "$(git status --porcelain docs/build)" ]; then
-            git add docs/build/
-            git commit -m "Auto-deploy gallery: $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git push origin main
-          else
-            echo "No changes to docs/build"
-          fi
-
       - name: Upload built docs (PR only)
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: documentation
           path: docs/build
+
+      - name: Upload Pages artifact (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
