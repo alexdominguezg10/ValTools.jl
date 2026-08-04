@@ -32,8 +32,8 @@ a.demo-card:visited {
 
 .demo-card img {
   width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
+  height: 190px;
+  object-fit: contain;
   display: block;
   background: #f2f2f2;
 }
