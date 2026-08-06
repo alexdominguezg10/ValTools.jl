@@ -149,10 +149,11 @@ These examples demonstrate the crown jewel of ValTools.jl: wavelet analysis for 
   <p>Production output of the rotary-ridge significance-test pipeline on the real, public GulfDriftersOpen dataset (2684 drifters): 497 significant eddy events, 86.5% cyclonic — compared against the paper's own published headline statistics.</p>
 </a>
 
-<div class="demo-card-future">
-  <h3>🌊 GulfDrifters Velocity Wavenumber Spectrum</h3>
-  <p>Analyze historical drifter velocities from the GulfDrifters program; compute significant-wavenumber spectrum using rotary-wavelet decomposition.</p>
-</div>
+<a class="demo-card" href="generated/gdp44000_rotary_spectrum_ridges.html">
+  <img src="assets/gdp44000_rotary_spectrum_ridges_thumb.png" alt="Rotary spectrum and wavelet ridges for a real drifter trapped in an eddy">
+  <h3>🌊 GulfDrifters Rotary Spectrum &amp; Wavelet Ridges</h3>
+  <p>Multitaper rotary spectrum (K=15) and rotary wavelet ridges (β=3, γ=3) on a real GDP drifter trapped in a cyclonic eddy for 5 months — reproduces Flare Figs. 2–3 and the Kunze (1985) effective-inertial-frequency shift. <i>(Card title corrected 2026-08-05: this is a frequency-domain analysis, not a wavenumber spectrum.)</i></p>
+</a>
 
 <div class="demo-card-future">
   <h3>✅ End-to-End Mooring Validation</h3>

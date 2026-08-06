@@ -996,6 +996,32 @@ plotted anywhere in this example. What's compared above is our own
 detections against the paper's own **published** headline figures
 (Sect. 4.7) — not against GOMED's underlying per-ridge data.
 
+### [Case study: rotary spectrum + wavelet ridges on a real drifter trapped in an eddy](examples/gdp44000_rotary_spectrum_ridges.jl)
+
+GDP drifter 44000 (WMO 4100571) — the drifter behind Figs. 1–3 of Jonathan
+Lilly's unfunded Flare NSF proposal. `Metrics.rotary_spectrum` (multitaper,
+K=15) and `JLab.rotary_wavetrans`/`rotary_ridge_properties` (generalized
+Morse wavelet, β=3, γ=3) on the real, public 2005 hourly record (8761 rows,
+bundled directly — small enough to ship, and unlike GOMED not licensed).
+The drifter spends ~5 months trapped in a cyclonic eddy, and Kunze (1985)
+predicts the effective inertial frequency shifts to `f_eff = f₀ − ω`
+(signed) — a real departure from the textbook single-peak spectrum.
+
+![Rotary multitaper spectrum and wavelet ridges for GDP drifter 44000](examples/gdp44000_rotary_spectrum_ridges.png)
+
+```julia
+eddy = argmax(r -> r.L, filter(r -> r.sense == :ccw, ridges))
+# dominant cyclonic ridge: 3538h (147 days), xi_bar=0.87
+# Kunze f_eff = 0.0580 cyc/h vs f0 = 0.0461 cyc/h (+25.7%), matching the
+# real Flare Fig. 3's f+Eddy line sitting ABOVE the Coriolis line
+```
+
+*Note:* building this example's crosscheck against real jLab MATLAB output
+(not just jLab's source) found two real normalization bugs, both since
+fixed: `rotary_spectrum` had an extra `/n` (~8761× too small), and
+`rotary_wavetrans`'s complex-input path was missing jLab's documented
+`1/√2` prefactor. See `scripts/jlab_crosscheck_flare_fig23.{jl,m}`.
+
 ---
 
 *ValTools.jl v0.1.0 — A. Dominguez, CICESE, 2026*

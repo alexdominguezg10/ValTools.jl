@@ -37,6 +37,7 @@ try
         "mooring_array_batch.jl",
         "unit_safe_validation.jl",
         "gomed_eddy_census.jl",
+        "gdp44000_rotary_spectrum_ridges.jl",
     ]
 
     @info "Processing $(length(examples_to_process)) examples with Literate.jl..."
@@ -100,6 +101,7 @@ try
             "Unit-Safe Validation" => "generated/unit_safe_validation.md",
             "Case Studies" => [
                 "GOMED Eddy Census" => "generated/gomed_eddy_census.md",
+                "GulfDrifters Rotary Spectrum & Wavelet Ridges" => "generated/gdp44000_rotary_spectrum_ridges.md",
             ],
         ],
         "API Reference" => "api.md",
