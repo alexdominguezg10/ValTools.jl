@@ -33,7 +33,9 @@ export compute_metrics, taylor_stats, bootstrap_metrics,
 export rotary_spectrum, rotary_coherence, cross_coherence, ellipse_polarization,
        alongtrack_wavenumber_spectrum,
        isotropic_2d_spectrum, cross_spectrum_kx_ky, detrend_2d_linear,
-       msvd
+       msvd, resample_uniform
+export HelmholtzSpectra, helmholtz_decomposition, wave_vortex_decomposition
+export velocity_structure_functions, helmholtz_structure_function
 
 # ── Colocation submodule ──────────────────────────────────────────
 include("Colocation/Colocation.jl")
@@ -75,7 +77,7 @@ export wavetrans, wavetrans_batch, tiredecode, transmax,
        mspec, sleptap,
        ellipsefit, rotary, rotary_wavetrans, rotary_ridge,
        bandpass, highpass, lowpass, detrend, fillgaps, hilbert,
-       validate_model_spectra, kinetic_energy_budget
+       validate_model_spectra, kinetic_energy_budget, fit_spectral_slope
 
 # ── GPU function stubs (implemented by ValToolsCUDAExt) ───────────
 function sigma_to_z_gpu end
@@ -96,6 +98,7 @@ function plot_streamlines end
 function plot_flow end
 function plot_field_panel end
 function animate_field_realtime end
+function reference_slope! end
 
 # Typed-struct plotting (Stage 4a): one function name per plot kind,
 # dispatching via multiple dispatch across the Types.jl structs it applies to.
@@ -110,6 +113,7 @@ function plot_colocation end
 export taylor_diagram, plot_comparison_map, plot_timeseries_comparison,
        plot_wind_rose, plot_wind_rose_comparison, lic_texture, plot_lic,
        plot_streamlines, plot_flow, plot_field_panel, animate_field_realtime,
+       reference_slope!,
        plot_timeseries, plot_spectrum, plot_rotary_spectrum, plot_rotary_coherence,
        plot_cross_spectrum, plot_ellipse_polarization, plot_colocation
 

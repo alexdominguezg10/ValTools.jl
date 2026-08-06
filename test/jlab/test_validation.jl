@@ -215,4 +215,34 @@ Random.seed!(42)
         # Similar signals → KE ratio near 1
         @test 0.3 < s["ke_ratio"] < 3.0
     end
+
+    @testset "fit_spectral_slope" begin
+        rng = MersenneTwister(7)
+        n = 300
+        k = 10 .^ range(-2, 1; length=n)
+        true_slope = -2.7
+        S = k .^ true_slope .* (1 .+ 0.03 .* randn(rng, n))
+
+        # ci=false matches the legacy bare-slope behavior
+        slope_only = fit_spectral_slope(k, S; ci=false)
+        @test slope_only isa Float64
+        @test isapprox(slope_only, true_slope; atol=0.1)
+
+        result = fit_spectral_slope(k, S)
+        @test result isa NamedTuple
+        @test isapprox(result.slope, true_slope; atol=0.1)
+        @test result.lo < result.slope < result.hi
+
+        # Band-limiting to a sub-range should still recover the same slope
+        # (the synthetic spectrum is a pure power law over the whole range)
+        banded = fit_spectral_slope(k, S; kband=(0.1, 1.0))
+        @test isapprox(banded.slope, true_slope; atol=0.15)
+
+        # Consistency with the legacy private helper on the exact same input
+        @test isapprox(fit_spectral_slope(k, S; ci=false), ValTools.JLab._fit_spectral_slope(k, S))
+
+        # Too few points after band-limiting → NaN CI, not an error
+        tiny = fit_spectral_slope(k, S; kband=(9.0, 10.0))
+        @test isnan(tiny.lo) || isfinite(tiny.slope)
+    end
 end

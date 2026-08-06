@@ -279,18 +279,102 @@ end
 
 
 """
-    alongtrack_wavenumber_spectrum(ssh_track, dx_km; detrend="linear", window="hann")
+    resample_uniform(t, x; dt=nothing)
+
+Resample a possibly irregularly-sampled and gappy (`NaN`) series `x(t)`
+onto a uniform grid via linear interpolation, skipping `NaN` samples
+rather than propagating them — real drifter and mooring records almost
+always have both irregular timestamps and occasional gaps, and every
+wavenumber/frequency entry point in this module needs uniform, finite
+input.
+
+`t` must be sorted ascending (ties allowed). `dt`, if not given, defaults
+to the median spacing of the finite samples of `t`. Values outside the
+range of finite `t` are held at the nearest finite endpoint (no
+extrapolation).
+
+Returns `(t_uniform, x_uniform)`, a regular grid spanning the finite range
+of `t`.
+"""
+function resample_uniform(t::AbstractVector{<:Real}, x::AbstractVector{<:Real};
+                          dt::Union{Real, Nothing}=nothing)
+    length(t) == length(x) || error("t and x must have the same length")
+    issorted(t) || error("t must be sorted ascending")
+
+    valid = isfinite.(t) .& isfinite.(x)
+    count(valid) >= 2 || error("need at least 2 finite (t,x) pairs to resample")
+
+    tv = Float64.(t[valid])
+    xv = Float64.(x[valid])
+
+    dt_use = dt === nothing ? median(diff(tv)) : Float64(dt)
+    dt_use > 0 || error("dt must be positive")
+
+    t_uniform = collect(tv[1]:dt_use:tv[end])
+    x_uniform = similar(t_uniform)
+
+    for (i, tu) in enumerate(t_uniform)
+        j = searchsortedlast(tv, tu)
+        if j < 1
+            x_uniform[i] = xv[1]
+        elseif j >= length(tv)
+            x_uniform[i] = xv[end]
+        elseif tv[j] == tu
+            x_uniform[i] = xv[j]
+        else
+            t0, t1 = tv[j], tv[j + 1]
+            x0, x1 = xv[j], xv[j + 1]
+            frac = (tu - t0) / (t1 - t0)
+            x_uniform[i] = x0 + frac * (x1 - x0)
+        end
+    end
+
+    return t_uniform, x_uniform
+end
+
+function _interp_nan_gaps(x::AbstractVector{<:Real})
+    xi = Float64.(x)
+    finite = isfinite.(xi)
+    count(finite) >= 2 || error("need at least 2 finite samples to interpolate over NaN gaps")
+    idx_finite = findall(finite)
+
+    xi[1:(idx_finite[1] - 1)] .= xi[idx_finite[1]]
+    xi[(idx_finite[end] + 1):end] .= xi[idx_finite[end]]
+
+    for k in 1:(length(idx_finite) - 1)
+        i0, i1 = idx_finite[k], idx_finite[k + 1]
+        if i1 > i0 + 1
+            for i in (i0 + 1):(i1 - 1)
+                frac = (i - i0) / (i1 - i0)
+                xi[i] = xi[i0] + frac * (xi[i1] - xi[i0])
+            end
+        end
+    end
+    return xi
+end
+
+"""
+    alongtrack_wavenumber_spectrum(ssh_track, dx_km; detrend="linear", window="hann", allow_nan=false)
 
 1-D power spectral density of an along-track field using Welch's method.
+
+By default `NaN`/`Inf` in `ssh_track` raise an error. Pass `allow_nan=true`
+to linearly interpolate over interior gaps first (edge gaps are filled
+with the nearest finite value, not extrapolated) — see
+[`resample_uniform`](@ref) for the equivalent irregular-time-grid case.
 
 Returns `(k, psd)` where `k` is in cycles/km.
 """
 function alongtrack_wavenumber_spectrum(ssh_track::AbstractVector{<:Real},
                                         dx_km::Real;
                                         detrend::String="linear",
-                                        window::String="hann")
+                                        window::String="hann",
+                                        allow_nan::Bool=false)
     x = Float64.(ssh_track)
-    any(!isfinite, x) && error("ssh_track must not contain NaN/Inf")
+    if any(!isfinite, x)
+        allow_nan || error("ssh_track must not contain NaN/Inf (pass allow_nan=true to interpolate over gaps)")
+        x = _interp_nan_gaps(x)
+    end
 
     n = length(x)
     nperseg = min(n, 256)
@@ -304,10 +388,33 @@ function alongtrack_wavenumber_spectrum(ssh_track::AbstractVector{<:Real},
 end
 
 
+function _fill_nan_2d(f::AbstractMatrix{<:Real})
+    g = Float64.(f)
+    nanmask = .!isfinite.(g)
+    n_nan = count(nanmask)
+    n_nan == 0 && return g
+    finite_vals = g[.!nanmask]
+    isempty(finite_vals) && error("field is entirely NaN/Inf")
+    frac = n_nan / length(g)
+    if frac > 0.1
+        @warn "isotropic_2d_spectrum: filling $(round(100 * frac; digits=1))% NaN cells with the " *
+              "field mean — this is a simple constant fill, not gap-filling, and biases the " *
+              "spectrum increasingly as this fraction grows" n_nan frac
+    end
+    g[nanmask] .= mean(finite_vals)
+    return g
+end
+
 """
-    isotropic_2d_spectrum(field, dx_km, dy_km; detrend="linear", window="hann", n_bins=nothing)
+    isotropic_2d_spectrum(field, dx_km, dy_km; detrend="linear", window="hann", n_bins=nothing, allow_nan=false)
 
 Radially-averaged 2-D power spectral density.
+
+By default `NaN`/`Inf` in `field` raise an error. Pass `allow_nan=true` to
+fill them with the field's finite mean first — a simple constant fill
+(not sophisticated gap-filling), adequate for a small NaN fraction (e.g.
+scattered coastal-mask cells) but increasingly biased as that fraction
+grows; a warning is emitted above 10% NaN.
 
 Returns `(k_iso, psd_iso)` where `k_iso` is in cycles/km.
 """
@@ -315,9 +422,13 @@ function isotropic_2d_spectrum(field::AbstractMatrix{<:Real},
                                dx_km::Real, dy_km::Real;
                                detrend::String="linear",
                                window::String="hann",
-                               n_bins::Union{Int,Nothing}=nothing)
+                               n_bins::Union{Int,Nothing}=nothing,
+                               allow_nan::Bool=false)
     f = Float64.(field)
-    any(!isfinite, f) && error("field must not contain NaN/Inf")
+    if any(!isfinite, f)
+        allow_nan || error("field must not contain NaN/Inf (pass allow_nan=true to fill gaps)")
+        f = _fill_nan_2d(f)
+    end
 
     ny, nx = size(f)
 

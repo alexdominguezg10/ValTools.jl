@@ -439,6 +439,16 @@ using LinearAlgebra
         @test length(k) > 0
         @test all(k .> 0)
         @test all(psd .>= 0)
+
+        signal_nan = copy(signal)
+        signal_nan[100:103] .= NaN
+        @test_throws ErrorException alongtrack_wavenumber_spectrum(signal_nan, dx)
+        k2, psd2 = alongtrack_wavenumber_spectrum(signal_nan, dx; allow_nan=true)
+        @test length(k2) > 0
+        @test all(psd2 .>= 0)
+        # interpolating over 4 samples out of 512 shouldn't materially move
+        # the recovered peak wavenumber
+        @test isapprox(k[argmax(psd)], k2[argmax(psd2)]; rtol=0.1)
     end
 
     @testset "isotropic_2d_spectrum" begin
@@ -449,6 +459,52 @@ using LinearAlgebra
         k_iso, psd_iso = isotropic_2d_spectrum(field, dx, dy)
         @test length(k_iso) > 0
         @test all(psd_iso[isfinite.(psd_iso)] .>= 0)
+
+        field_nan = copy(field)
+        field_nan[1:5, 1:5] .= NaN
+        @test_throws ErrorException isotropic_2d_spectrum(field_nan, dx, dy)
+        k_iso2, psd_iso2 = isotropic_2d_spectrum(field_nan, dx, dy; allow_nan=true)
+        @test length(k_iso2) > 0
+        @test all(psd_iso2[isfinite.(psd_iso2)] .>= 0)
+
+        all_nan = fill(NaN, ny, nx)
+        @test_throws ErrorException isotropic_2d_spectrum(all_nan, dx, dy; allow_nan=true)
+    end
+
+    @testset "resample_uniform" begin
+        # Irregular sampling with a gap (NaN), reconstructing a known sinusoid
+        rng = MersenneTwister(6)
+        t_true = sort(100 .* rand(rng, 400))
+        x_true = sin.(2π .* t_true ./ 10.0)
+        t_irregular = copy(t_true)
+        x_gappy = copy(x_true)
+        x_gappy[50:55] .= NaN
+
+        t_u, x_u = resample_uniform(t_irregular, x_gappy; dt=0.5)
+        @test issorted(t_u)
+        @test all(isfinite, x_u)
+        @test isapprox(t_u[1], minimum(t_irregular[isfinite.(x_gappy)]); atol=1.0)
+
+        # Reconstructed signal should still look like the same sinusoid at
+        # every point (elementwise max deviation, not isapprox's default
+        # whole-array 2-norm — with ~200 points a scattering of small
+        # per-point errors sums in the norm to something that looks large
+        # even though no individual point is off by much)
+        x_expected = sin.(2π .* t_u ./ 10.0)
+        @test maximum(abs.(x_u .- x_expected)) < 0.15
+
+        @test_throws ErrorException resample_uniform([1.0, 2.0], [1.0])
+        @test_throws ErrorException resample_uniform([2.0, 1.0], [1.0, 2.0])
+        @test_throws ErrorException resample_uniform([NaN, NaN, 1.0], [NaN, NaN, 1.0])
+    end
+
+    @testset "reference_slope! — draws without error and returns the axis" begin
+        fig = Figure()
+        ax = Axis(fig[1, 1]; xscale=log10, yscale=log10)
+        k, psd = alongtrack_wavenumber_spectrum(sin.(2π .* (0:511) ./ 50.0), 2.0)
+        lines!(ax, k, psd)
+        ax2 = reference_slope!(ax, k[1], psd[1], -3.0)
+        @test ax2 === ax
     end
 
     @testset "msvd — SVD-based polarization analysis" begin
@@ -540,6 +596,151 @@ using LinearAlgebra
         plane = 2.0 .* x_grid .+ 3.0 .* y_grid .+ 5.0
         result = detrend_2d_linear(Float64.(plane))
         @test maximum(abs.(result)) < 1e-10
+    end
+
+    @testset "helmholtz_decomposition — energy conservation (exact identity)" begin
+        # KErot(k) + KEdiv(k) ≡ 0.5*(Cu(k)+Cv(k)) is an exact identity of the
+        # closed-form BCF14 integral (derivable directly from eqs. 2.27/2.30-2.31,
+        # independent of what Cu, Cv actually are) — the strongest regression
+        # test available since it doesn't depend on any external published
+        # number, only on this function's own internal arithmetic being right.
+        # Clean (noise-free) power laws: this test's purpose is to check the
+        # identity holds to trapezoidal-discretization precision, not to
+        # check robustness to noisy input — injecting noise here just adds
+        # an unrelated, unbounded source of per-point scatter (noise
+        # differentiated via the central-difference step) on top of the
+        # thing actually being tested.
+        n = 200
+        k = 10 .^ range(-3, 0; length=n)
+        Cu = 1.0 .* k .^ (-2.2)
+        Cv = 0.7 .* k .^ (-1.8)
+        hs = helmholtz_decomposition(k, Cu, Cv)
+
+        @test hs.k == k
+        interior = 10:(n - 10)   # exclude edges: backward-integration BC forces
+                                  # Dpsi=Dphi=0 at k[end], and cumulative trapezoidal
+                                  # error is largest near both ends
+        lhs = hs.KErot[interior] .+ hs.KEdiv[interior]
+        rhs = 0.5 .* (Cu[interior] .+ Cv[interior])
+        @test maximum(abs.(lhs .- rhs) ./ abs.(rhs)) < 0.02
+
+        @test_throws ErrorException helmholtz_decomposition([1.0, 2.0], [1.0], [1.0, 2.0])
+        @test_throws ErrorException helmholtz_decomposition([2.0, 1.0, 3.0], ones(3), ones(3))
+        @test_throws ErrorException helmholtz_decomposition([-1.0, 1.0, 2.0], ones(3), ones(3))
+    end
+
+    @testset "helmholtz_decomposition — pure-rotational and pure-divergent analytic cases" begin
+        # Derived independently from the closed-form D-functions (not just
+        # copied from BCF14): requiring Dphi ≡ 0 for ALL s forces, via its own
+        # derivative, Dpsi(s) = Cu(s) and Cv(s) = n*Cu(s) when Cu = k^-n — which
+        # matches BCF14 eq. 2.11 for a purely non-divergent flow. The mirrored
+        # case (Cv = k^-n, Cu = n*Cv) analogously forces Dpsi ≡ 0.
+        n = 400
+        k = 10 .^ range(-4, 0; length=n)
+        slope = 2.5
+        interior = 30:(n - 30)
+
+        # Pure rotational: Cu ~ k^-n, Cv = n*Cu ⟹ Dphi ≈ 0
+        Cu_rot = k .^ (-slope)
+        Cv_rot = slope .* Cu_rot
+        hs_rot = helmholtz_decomposition(k, Cu_rot, Cv_rot)
+        @test all(abs.(hs_rot.Dphi[interior]) .< 1e-3 .* maximum(abs.(hs_rot.Dpsi[interior])))
+
+        # Pure divergent (mirrored): Cv ~ k^-n, Cu = n*Cv ⟹ Dpsi ≈ 0
+        Cv_div = k .^ (-slope)
+        Cu_div = slope .* Cv_div
+        hs_div = helmholtz_decomposition(k, Cu_div, Cv_div)
+        @test all(abs.(hs_div.Dpsi[interior]) .< 1e-3 .* maximum(abs.(hs_div.Dphi[interior])))
+    end
+
+    @testset "wave_vortex_decomposition" begin
+        n = 100
+        k = 10 .^ range(-2, 0; length=n)
+        rng = MersenneTwister(3)
+        Cu = k .^ (-2.0) .* (1 .+ 0.05 .* randn(rng, n))
+        Cv = 0.8 .* k .^ (-1.9) .* (1 .+ 0.05 .* randn(rng, n))
+        hs = helmholtz_decomposition(k, Cu, Cv)
+        wv = wave_vortex_decomposition(hs)
+
+        @test wv.k == hs.k
+        @test isapprox(wv.Ewave, 2.0 .* hs.KEdiv)
+        @test isapprox(wv.Evortex, 2.0 .* hs.KErot)
+        # Etotal = Ewave + Evortex should reduce to Cu+Cv exactly (same
+        # identity as the energy-conservation test above, just rearranged)
+        interior = 15:(n - 15)
+        @test isapprox((wv.Ewave .+ wv.Evortex)[interior], (Cu .+ Cv)[interior]; rtol=0.03)
+    end
+
+    @testset "velocity_structure_functions" begin
+        rng = MersenneTwister(4)
+        n = 60
+        x = 100 .* rand(rng, n)
+        y = 100 .* rand(rng, n)
+
+        # Pure solid-body rotation: u = -Ω*y, v = Ω*x (rotational, zero-divergence
+        # flow) ⟹ velocity differences are purely transverse to the separation
+        # vector, so Dll should be ≈ 0 everywhere pairs exist.
+        Ω = 0.05
+        u = -Ω .* y
+        v = Ω .* x
+        rbins = collect(0.0:10.0:80.0)
+        sf = velocity_structure_functions(x, y, u, v; rbins=rbins)
+
+        @test length(sf.r) == length(rbins) - 1
+        valid = sf.npairs .> 0
+        @test any(valid)
+        @test all(isapprox.(sf.Dll[valid], 0.0; atol=1e-8))
+        @test all(sf.Dtt[valid] .> 0)   # rigid rotation: Dtt = (Ω r)^2 > 0 for r>0
+
+        @test_throws ErrorException velocity_structure_functions([1.0], [1.0, 2.0], [1.0], [1.0, 2.0]; rbins=rbins)
+    end
+
+    @testset "helmholtz_structure_function" begin
+        # exact-by-construction algebraic identity (documented as not an
+        # independent correctness check, but confirms no arithmetic slip)
+        r = collect(1.0:1.0:40.0)
+        rng = MersenneTwister(5)
+        Dll_id = r .^ 1.3 .* (1 .+ 0.02 .* rand(rng, length(r)))
+        Dtt_id = 0.6 .* r .^ 1.1
+        hsf_id = helmholtz_structure_function(r, Dll_id, Dtt_id)
+        @test isapprox(hsf_id.Drr .+ hsf_id.Ddd, Dll_id .+ Dtt_id)
+
+        # Exponent-dependent analytic cases, derived directly from this
+        # function's own closed-form integral (the exact real-space analog
+        # of how BCF14's Cv=n*Cu wavenumber relation was derived and
+        # verified for helmholtz_decomposition above): for Dll(r) = r^p and
+        # Dtt(r) = c*Dll(r), requiring Ddd ≡ 0 for ALL r algebraically
+        # forces c = 1+p (NOT the naive guess c=1 — an earlier version of
+        # this test used solid-body rotation / uniform strain, where Dll or
+        # Dtt is identically zero rather than sharing the same power-law
+        # shape; that's a boundary case of this family, not a
+        # counterexample). The mirrored case Drr ≡ 0 requires c = 1/(1+p).
+        #
+        # p=2 is used deliberately, not arbitrarily: the code's near-origin
+        # treatment assumes the integrand (Dtt-Dll)/τ → 0 as τ→0, which only
+        # holds for p>1 (a real-space requirement discovered while writing
+        # this test — an initial p=0.7 attempt failed because τ^(p-1)
+        # diverges at the origin for p<1, outside the function's documented
+        # domain). p=2 is also not just numerically convenient: it matches
+        # this project's own target regime (Callies et al. 2015 "summer
+        # submesoscale" k^-3 KE slope maps to structure-function exponent
+        # p=n-1=2), and trapezoidal integration is exact for the resulting
+        # linear integrand, so this case is exact, not just approximate.
+        p = 2.0
+        rr = collect(1.0:1.0:60.0)
+        Dll_p = rr .^ p
+
+        Dtt_rot = (1 + p) .* Dll_p
+        h_rot = helmholtz_structure_function(rr, Dll_p, Dtt_rot)
+        @test all(isapprox.(h_rot.Ddd, 0.0; atol=1e-8))
+        @test isapprox(h_rot.Drr, Dll_p .+ Dtt_rot; rtol=1e-8)
+
+        Dtt_div = Dll_p ./ (1 + p)
+        h_div = helmholtz_structure_function(rr, Dll_p, Dtt_div)
+        @test all(isapprox.(h_div.Drr, 0.0; atol=1e-8))
+        @test isapprox(h_div.Ddd, Dll_p .+ Dtt_div; rtol=1e-8)
+
+        @test_throws ErrorException helmholtz_structure_function([2.0, 1.0], [1.0, 1.0], [1.0, 1.0])
     end
 
     # ══════════════════════════════════════════════════════════════

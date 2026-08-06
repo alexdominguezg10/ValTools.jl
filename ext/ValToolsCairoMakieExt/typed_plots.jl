@@ -129,6 +129,31 @@ function ValTools.plot_spectrum(se::ValTools.Types.SpectralEstimate{Q};
     return fig
 end
 
+"""
+    reference_slope!(ax, k_ref, S_ref, slope; krange=nothing, label=nothing,
+                      color=:grey40, linestyle=:dash, linewidth=1.5)
+
+Draw a straight power-law guide line `S = S_ref * (k/k_ref)^slope` on an
+existing log-log spectral `Axis` — the `k^-3`, `k^-5/3`, etc. reference
+lines this project's spectral figures repeatedly need, anchored to pass
+through the point `(k_ref, S_ref)`.
+
+`krange` defaults to `k_ref .* (0.3, 3.0)`; `label` defaults to
+`"k^slope"`. Mutates `ax` in place (Makie `!` convention) and returns it,
+so calls can be chained after the main spectrum is already plotted.
+"""
+function ValTools.reference_slope!(ax, k_ref::Real, S_ref::Real, slope::Real;
+                                   krange::Union{Tuple{<:Real, <:Real}, Nothing}=nothing,
+                                   label::Union{String, Nothing}=nothing,
+                                   color=:grey40, linestyle=:dash, linewidth::Real=1.5)
+    klo, khi = krange === nothing ? (0.3 * k_ref, 3.0 * k_ref) : krange
+    kk = 10 .^ range(log10(klo), log10(khi); length=50)
+    SS = S_ref .* (kk ./ k_ref) .^ slope
+    lbl = label === nothing ? "k^$(round(slope; digits=2))" : label
+    lines!(ax, kk, SS; color=color, linestyle=linestyle, linewidth=linewidth, label=lbl)
+    return ax
+end
+
 # ── RotarySpectralEstimate ─────────────────────────────────────────────
 
 """

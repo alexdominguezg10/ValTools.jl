@@ -631,6 +631,69 @@ end
 # HELPERS
 # ============================================================================
 
+"""
+    fit_spectral_slope(k, S; kband=nothing, ci=true, n_boot=1000, confidence=0.95, seed=42)
+
+Fit `S(k) ~ k^α` via ordinary least squares in log-log space and return the
+slope `α`. This is the exported, band-limited, CI-capable promotion of the
+internal [`_fit_spectral_slope`](@ref) helper (which remains as a private
+zero-overhead building block, unchanged, so existing call sites like
+[`validate_spectra`](@ref) are unaffected).
+
+`kband`, if given as `(klo, khi)`, restricts the fit to `klo <= k <= khi`
+before fitting — useful for isolating an inertial subrange or an
+identified spectral regime away from noise-floor or forcing-scale
+contamination.
+
+If `ci=true` (default), also computes a bootstrap confidence interval on
+the slope (resampling `(k,S)` pairs with replacement, `n_boot` times,
+matching [`bootstrap_metrics`](@ref)'s method) and returns a NamedTuple
+`(slope, lo, hi)`. If `ci=false`, returns the bare slope as a `Float64`
+(matching the legacy `_fit_spectral_slope` return type).
+
+Fewer than 4 points after band-limiting returns `(slope, lo=NaN, hi=NaN)`
+(or just `slope` if `ci=false`) — there isn't enough data for a meaningful
+bootstrap.
+"""
+function fit_spectral_slope(k::AbstractVector{<:Real}, S::AbstractVector{<:Real};
+                            kband::Union{Tuple{<:Real, <:Real}, Nothing}=nothing,
+                            ci::Bool=true, n_boot::Int=1000, confidence::Real=0.95,
+                            seed::Int=42)
+    kk = Float64.(k)
+    SS = Float64.(S)
+    if kband !== nothing
+        klo, khi = kband
+        mask = (kk .>= klo) .& (kk .<= khi)
+        kk = kk[mask]
+        SS = SS[mask]
+    end
+
+    slope = _fit_spectral_slope(kk, SS)
+    ci || return slope
+
+    n = length(kk)
+    if n < 4
+        return (slope=slope, lo=NaN, hi=NaN)
+    end
+
+    rng = MersenneTwister(seed)
+    alpha = (1.0 - confidence) / 2.0
+    boots = Float64[]
+    for _ in 1:n_boot
+        idx = rand(rng, 1:n, n)
+        s = _fit_spectral_slope(kk[idx], SS[idx])
+        isfinite(s) && push!(boots, s)
+    end
+
+    length(boots) < 2 && return (slope=slope, lo=NaN, hi=NaN)
+
+    sorted = sort(boots)
+    nb = length(sorted)
+    lo = sorted[max(1, round(Int, alpha * nb))]
+    hi = sorted[min(nb, round(Int, (1 - alpha) * nb))]
+    return (slope=slope, lo=lo, hi=hi)
+end
+
 function _fit_spectral_slope(freqs::AbstractVector, psd::AbstractVector)
     # Fit PSD ~ f^α in log-log space
     lf = log10.(freqs)
