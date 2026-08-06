@@ -325,7 +325,7 @@ Random.seed!(42)
         @test_throws ErrorException wavetrans(x, complex.(y))  # mixed real/complex
     end
 
-    @testset "wavetrans — complex input (no factor of 2)" begin
+    @testset "wavetrans — complex input vs rotary_wavetrans (1/sqrt(2) factor)" begin
         rng = MersenneTwister(13)
         N = 200
         u = randn(rng, N)
@@ -334,10 +334,16 @@ Random.seed!(42)
 
         wtc, fsc = wavetrans(w)
         @test size(wtc) == (N, length(fsc))
-        # Complex input is exactly the CCW branch of rotary_wavetrans
+        # rotary_wavetrans's CCW branch is jLab's WP=(1/sqrt(2))*(WX+iWY)
+        # convention (wavetrans.m); plain wavetrans(complex(u,v)) has no
+        # such convention (it's ValTools' own general complex-signal path,
+        # with no jLab equivalent to match), so the two differ by exactly
+        # that factor -- not equal, as an earlier version of this test
+        # (written before the missing-1/sqrt(2) bug was found and fixed
+        # 2026-08-05) incorrectly asserted.
         ccw, _, fsr = rotary_wavetrans(u, v)
         @test fsc == fsr
-        @test wtc ≈ ccw rtol=1e-12
+        @test wtc ./ sqrt(2) ≈ ccw rtol=1e-12
     end
 
     @testset "rotary_wavetrans — N-D per-column equivalence" begin

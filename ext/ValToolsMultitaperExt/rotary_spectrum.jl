@@ -52,7 +52,17 @@ function Met.rotary_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{<:Real
         Hk0[k] = sum(taper)
         w_k = (uf .* taper) .+ im .* (vf .* taper)
         W_k = fft(w_k)
-        psd_k = (abs.(W_k) .^ 2) .* dt_hours ./ n
+        # NO extra /n here: `tapers` from Multitaper.jl's dpss_tapers are
+        # unit-energy-normalized (sum(taper.^2)==1), which already supplies
+        # the equivalent of the periodogram's boxcar-window /n. Dividing by
+        # n again double-counts that normalization, making every power
+        # value exactly n times too small. Found 2026-08-05 crosschecking
+        # against real jLab mspec.m on GDP drifter 44000 (this was the
+        # dominant cause of the periodogram/multitaper mismatch visible in
+        # a reproduced Flare Fig. 2 -- real jLab has the multitaper line
+        # sitting inside the periodogram's envelope, this bug put it ~n
+        # below it) -- see scripts/jlab_crosscheck_flare_fig23.{jl,m}.
+        psd_k = (abs.(W_k) .^ 2) .* dt_hours
 
         S_ccw_k[:, k] = psd_k[pos_mask]
         W_ccw_k[:, k] = W_k[pos_mask]

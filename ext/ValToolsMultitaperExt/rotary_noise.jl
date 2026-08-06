@@ -37,6 +37,22 @@ function Met.rotary_noise_spectrum(u::AbstractVector{<:Real}, v::AbstractVector{
     # interpolates the CW branch onto the positive-frequency grid and drops
     # DC/Nyquist, whereas Eq. 69 is a pointwise min over the native grid and
     # the surrogate's ifft needs every bin.
+    # NOTE (checked 2026-08-05, do NOT "fix" this to match rotary_spectrum.jl):
+    # this looks like the same missing-taper-normalization bug found in
+    # Met.rotary_spectrum (extra /n on top of the tapers' own unit-energy
+    # normalization), but it is not the same situation here. This function's
+    # only consumer, rotary_noise_surrogate below, builds its complex noise
+    # realization as `eps_t = ifft(amp.*z).*n` with `amp=sqrt(S_iso/dt)` --
+    # a raw (unweighted-by-Δf) sum of S_iso over all n bins, which by
+    # discrete Parseval's own factor-of-n exactly cancels this /n. Removing
+    # it here without also reworking that formula would silently break the
+    # surrogate's variance-matching (see "rotary_noise_surrogate — variance
+    # and isotropy" in test/jlab/test_ellipse.jl, which checks realized
+    # surrogate variance against the real input's own sample variance --
+    # an externally-anchored check, not a self-consistency one, and it
+    # currently passes). Individual S_full[i]/S_iso[i] values ARE off by
+    # 1/n if read directly at a single frequency (same as the
+    # rotary_spectrum bug), just not in the one place this module uses them.
     S_k = Matrix{Float64}(undef, n, K)
     for k in 1:K
         taper = @view tapers[:, k]

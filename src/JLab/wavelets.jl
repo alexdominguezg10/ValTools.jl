@@ -509,7 +509,14 @@ function rotary_wavetrans(u::AbstractArray{<:Real}, v::AbstractArray{<:Real};
     # An analytic (one-sided) wavelet on w = u+iv isolates CCW content; on
     # conj(w) = u-iv, CW content. wavetrans detrends internally (complex
     # detrend ≡ separate detrends of u and v; see _detrend_signal).
-    W = ComplexF64.(u) .+ im .* ComplexF64.(v)
+    #
+    # jLab's real wavetrans.m documents an explicit 1/sqrt(2) prefactor for
+    # complex (bivariate) input: WP = (1/sqrt(2))*(WX+iWY). This was missing
+    # here, making every rotary wavelet/ridge amplitude sqrt(2) too large
+    # (frequency/timing unaffected, since those come from ratios/phase, not
+    # amplitude). Found 2026-08-05 crosschecking against real jLab
+    # wavetrans.m/ridgewalk.m -- see scripts/jlab_crosscheck_flare_fig23.{jl,m}.
+    W = (ComplexF64.(u) .+ im .* ComplexF64.(v)) ./ sqrt(2)
     wt_ccw, _ = wavetrans(W; fs=fs_v, gamma=g, beta=b, boundary=boundary)
     wt_cw, _ = wavetrans(conj.(W); fs=fs_v, gamma=g, beta=b, boundary=boundary)
 
