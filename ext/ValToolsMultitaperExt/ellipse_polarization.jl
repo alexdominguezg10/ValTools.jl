@@ -53,13 +53,24 @@ function Met.ellipse_polarization(u::AbstractVector{<:Real}, v::AbstractVector{<
     Syy_k = Matrix{Float64}(undef, nfreq, K)
     Sxy_k = Matrix{ComplexF64}(undef, nfreq, K)
 
+    # `.* dt_hours` matches jLab's own mspec.m normalization exactly
+    # (jSpectral/mspec.m: `cellout{2}=avgspec(mmatx,mmatx,N).*dt;`, confirmed
+    # by reading the real source) -- without it, d1/d2 (the spectral-matrix
+    # eigenvalues, i.e. major/minor-axis POWER in absolute physical units)
+    # are off by a factor of 1/dt_hours from jLab's convention. theta/nu/P/
+    # alpha/beta are unaffected (dt cancels in those ratios), which is why
+    # this was invisible to every existing test: they all use the default
+    # dt_hours=1.0, where 1/dt_hours=1. Found 2026-08-06 by real-jLab
+    # crosscheck on dt=0.5h ARE mooring data
+    # (scripts/jlab_crosscheck_ellipse_polarization.{jl,m}), where it showed
+    # up as a clean, constant d1/d2 ratio of ~2.0 = 1/0.5.
     for k in 1:K
         taper = @view tapers[:, k]
         Uk = fft(uf .* taper)[pos_mask]
         Vk = fft(vf .* taper)[pos_mask]
-        Sxx_k[:, k] = abs.(Uk) .^ 2
-        Syy_k[:, k] = abs.(Vk) .^ 2
-        Sxy_k[:, k] = Uk .* conj.(Vk)
+        Sxx_k[:, k] = abs.(Uk) .^ 2 .* dt_hours
+        Syy_k[:, k] = abs.(Vk) .^ 2 .* dt_hours
+        Sxy_k[:, k] = Uk .* conj.(Vk) .* dt_hours
     end
 
     Sxx = vec(mean(Sxx_k; dims=2))

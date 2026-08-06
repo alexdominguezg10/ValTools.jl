@@ -7,6 +7,29 @@ follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **GOMED baseline reconciliation** (closes the "GulfDrifters baseline is
+  not settled" gap from 0.2.0, below). GOMED access was granted
+  2026-08-02; root cause of the earlier mismatch was that jLab's real
+  `eddyridges.m`→`spheretrans.m` wavelet-transforms **position**, not
+  velocity, which `rotary_ridge_properties` had been built/tuned against
+  the whole time. Fixed by feeding it `local_tangent_plane(lat,lon)`
+  position projections instead of raw velocity — took the 28-case
+  jLab-crosscheck harness from mean Jaccard 0.575 to 0.957. Full
+  2684-drifter census (`validate_gulfdrifters_significant.jl`, job 5047
+  on Ixachi) vs. published GOMED: per-drifter events 1.31 (GOMED 1.57), L
+  median 3.70 cycles (GOMED 3.57), cyclonic/anticyclonic split 86.9%/13.1%
+  (GOMED 84.9%/15.1%), count-weighted mean sign +0.738 (GOMED +0.698).
+  Energy-weighted mean sign remains gapped (+0.088 vs. GOMED's +0.284) —
+  known limitation, `kappa_bar`/`mean_amplitude` isn't GOMED's real
+  `V_bar²` kinetic-energy velocity. A true spherical (time-varying-center)
+  reprojection was also ported and tested as a follow-up refinement
+  (0.957→0.958, no measurable improvement — ruled out; flat-tangent-plane
+  approximation was already adequate at Gulf-of-Mexico eddy scales).
+  **Reconfirmed 2026-08-06**: re-ran the local 28-case harness
+  (`scripts/case_study_gomed.jl`) fresh against current code — 26/28
+  (92.9%) event detection, 100% rotation-sense agreement among matches,
+  identical to the closed 2026-08-02 result (including the one known weak
+  case, ridge 11338, still fragmenting at 0.44 overlap).
 - **N-dimensional wavelet support** (jLab trailing-dims semantics —
   Flare Table 1's "N-dimensional support" wavelet void): `wavetrans` now
   accepts any array with time along dimension 1 and independent signals
@@ -69,6 +92,20 @@ follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `ellipse_polarization`'s spectral matrix (`Sxx`/`Syy`/`Sxy`) was missing
+  the `dt_hours` normalization jLab's `mspec.m` applies
+  (`avgspec(...).*dt`, confirmed by reading the real jLab source) — `d1`/
+  `d2` (the spectral-matrix eigenvalues, i.e. major/minor-axis power in
+  absolute physical units) came out a factor of `1/dt_hours` too large.
+  `theta`/`nu`/`P`/`alpha`/`beta` were unaffected (`dt` cancels in those
+  ratios), which is why this was invisible to every existing test — all of
+  them use the default `dt_hours=1.0`, where the missing factor is exactly
+  1. Found 2026-08-06 by a new real-jLab crosscheck harness
+  (`scripts/jlab_crosscheck_ellipse_polarization.{jl,m}`) on real ARE/
+  ANC_GoMW_deep mooring data (dt=0.5 h), where it showed up as a clean,
+  constant `d1`/`d2` ratio of ~2.0. After the fix, `d1`/`d2` match jLab to
+  ~1–2% (real-data numerical noise from two independently-computed DPSS
+  taper sets), `P` matches to ~0.1% at the record's dominant spectral peak.
 - `wavetrans(x; boundary=:mirror, gpu=true)` returned the wrong `N`
   samples (the first mirrored block instead of the middle — the boundary
   offset was never passed to the GPU path).
@@ -203,6 +240,13 @@ polarization/coherence metrics → typed plotting), started 2026-07-02.
 - **GulfDrifters baseline is not settled** — see the three non-comparable
   numbers under Added, above. Revisit once GOMED access is granted, or a
   full (non-subsampled) significance-test census is run.
+  **RESOLVED 2026-08-02, reconfirmed 2026-08-06 — see the "GOMED baseline
+  reconciliation" entry under [Unreleased] below.** GOMED access was
+  granted; the real root cause (position vs. velocity input) was found and
+  fixed, and both the full 2684-drifter census and a fresh local 28-case
+  re-run now agree well with the published dataset. Left here rather than
+  rewritten, to preserve the historical record of what was true at this
+  release.
 - `envs/cpu/Project.toml` and `envs/gpu/Project.toml` don't list
   `Multitaper` as a direct dependency (only the published package's
   weakdep mechanism provides it), which meant every ad hoc validation
@@ -211,6 +255,9 @@ polarization/coherence metrics → typed plotting), started 2026-07-02.
   (this is a different tradeoff than the published-package GPL
   consideration that justified the weakdep in the first place, since these
   are internal dev/test environments, not the public package).
+  **Partially resolved**: `Multitaper` is now a direct dep of `envs/cpu`
+  (added prior to this release); `DataFrames` was still missing as of
+  2026-08-06 (added then, needed by the GOMED case-study scripts).
 - `RAFOSLoader`'s `bbox`/`date_range`/`pressure_range` filters and
   `rafos_velocity_estimates()` are silent no-ops due to a `:col in
   names(df)` vs. `hasproperty(df, :col)` bug (DataFrames.jl returns
