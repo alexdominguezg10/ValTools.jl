@@ -1,8 +1,9 @@
 [deps]
-ValTools = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+Multitaper = "a81958ac-9ec9-4086-814d-3ae87249a5e8"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+ValTools = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 [compat]
 julia = "1.10"
