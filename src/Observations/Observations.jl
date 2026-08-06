@@ -24,6 +24,7 @@ include("gem.jl")
 include("ghrsst.jl")
 include("goflow.jl")
 include("canek_section.jl")
+include("anc_gomw_mooring.jl")
 include("clouddrift.jl")
 include("glider.jl")
 
@@ -41,6 +42,7 @@ export GEMBuilder, gem_from_argo, gem_fit!, gem_tau_to_profiles, gem_model_tau,
 export GHRSSTLoader, ghrsst_sst
 export GOFLOWLoader, goflow_u, goflow_v, goflow_speed, goflow_vorticity
 export CANEKSectionLoader, canek_to_dataset, canek_transport
+export ANCMooringLoader, anc_mooring_profiles
 export CloudDriftLoader, clouddrift_trajectory, clouddrift_n_trajectories, clouddrift_to_dataframe
 export GliderLoader, glider_profiles, glider_section, glider_to_dataframe
 
